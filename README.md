@@ -1,50 +1,108 @@
-# Welcome to your Expo app 👋
+# green-room
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Green Room is a mobile-first sports matching app that helps users find nearby players with similar skill levels, connect through chat, and discover places to play.
 
-## Get started
+---
 
-1. Install dependencies
+## Features
+- User onboarding
+- Profile setup
+- Match players by sport, skill level, and location
+- Gamified matching experience with player cards
+- Real-time chat between matched users
+- Venue recommendations
+- Direct booking links for recommended venues
+- Secure payment redirect for court / facility reservations
+- Dashboard with navigation:
+  - Explore
+  - Match
+  - Chat
+  - Profile
 
-   ```bash
-   npm install
-   ```
+---
 
-2. Start the app
+## User Flow
+1. Onboarding  
+2. Create Profile  
+3. Enter Dashboard  
+4. Start Matching  
+5. Connect with Players  
+6. Chat & Plan  
+7. View Recommended Venues  
+8. Book & Pay Through Venue Link  
+9. Play
 
-   ```bash
-   npx expo start
-   ```
+---
 
-In the output, you'll find options to open the app in a
+## Planning & Booking Flow
+After users match and begin chatting, Green Room can recommend nearby venues based on:
+- Selected sport
+- User location
+- Distance preference
+- Venue rating
+- Availability
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+Each venue card includes:
+- Venue name
+- Distance
+- Price
+- Rating
+- Available times
+- Book Now button
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+When users tap **Book Now**, they are redirected to the venue's official booking or payment page via in-app browser.
 
-## Get a fresh project
+---
 
-When you're ready, run:
+## Tech Stack
 
+### Framework
+- Expo (React Native)
+- TypeScript
+
+### UI
+- NativeWind (Tailwind CSS for React Native)
+
+### Navigation
+- Expo Router (file-based routing)
+
+### Backend
+- Supabase (auth, database, real-time chat)
+
+### Maps & Location
+- react-native-maps
+- Google Maps API
+
+### Booking
+- Expo WebBrowser (redirect to venue booking pages)
+
+---
+
+## Project Structure
 ```bash
-npm run reset-project
+green-room/
+├── app/
+│   ├── (auth)/
+│   │   ├── onboarding.tsx
+│   │   └── login.tsx
+│   ├── (tabs)/
+│   │   ├── explore.tsx
+│   │   ├── match.tsx
+│   │   ├── chat.tsx
+│   │   └── profile.tsx
+│   └── _layout.tsx
+├── components/
+├── hooks/
+├── lib/
+│   └── supabase.ts
+├── types/
+├── assets/
+├── package.json
+└── README.md
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+---
 
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Publishing
+- Target platform: iOS (iPhone)
+- Distribution: Apple App Store via Expo EAS Build
