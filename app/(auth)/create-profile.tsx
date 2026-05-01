@@ -78,7 +78,7 @@ export default function CreateProfileScreen() {
 
     setFormError("");
     setDobError("");
-    router.replace("/(tabs)/explore");
+    router.push("/(auth)/additional-info" as never);
   };
 
   return (
