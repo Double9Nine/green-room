@@ -60,7 +60,7 @@ export default function AdditionalInfoScreen() {
         </View>
 
         <Pressable
-          onPress={() => router.replace("/(tabs)/explore")}
+          onPress={() => router.push("/(tabs)/match")}
           style={({ pressed }) => [styles.completeButton, pressed && styles.actionButtonPressed]}
         >
           <Text style={styles.completeButtonText}>Complete Profile</Text>
