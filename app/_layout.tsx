@@ -21,12 +21,20 @@ export default function RootLayout() {
           name="match-results"
           options={{
             headerShown: true,
-            title: "Match Results",
+            title: "MY MATCHES",
             headerBackTitle: "Back",
-            headerTintColor: "#15803d",
-            headerStyle: { backgroundColor: "#f0fdf4" },
-            headerTitleStyle: { color: "#0f172a", fontWeight: "700" },
+            headerTintColor: "#d4af37",
+            headerStyle: { backgroundColor: "#052e16" },
+            headerTitleStyle: { color: "#d4af37", fontWeight: "800" },
           }}
+        />
+        <Stack.Screen
+          name="chat-conversation"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="player-profile"
+          options={{ headerShown: false }}
         />
       </Stack>
       <StatusBar style="auto" />

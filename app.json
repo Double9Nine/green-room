@@ -11,7 +11,9 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Allow Green Room to access your photos so you can upload a profile image.",
+        "NSPhotoLibraryUsageDescription": "Allow Green Room to access your photos so you can send images in chat.",
+        "NSCameraUsageDescription": "Allow Green Room to use your camera so you can take photos in chat.",
+        "NSMicrophoneUsageDescription": "Allow Green Room to use your microphone so you can send voice messages.",
         "NSLocationWhenInUseUsageDescription": "Allow Green Room to access your location to find players near you."
       }
     },
@@ -26,6 +28,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "READ_MEDIA_IMAGES",
+        "CAMERA",
+        "RECORD_AUDIO",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
       ]
@@ -50,7 +54,8 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-image-picker",
-      "expo-location"
+      "expo-location",
+      "expo-av"
     ],
     "experiments": {
       "typedRoutes": true,

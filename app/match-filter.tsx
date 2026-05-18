@@ -4,20 +4,14 @@ import { Picker } from "@react-native-picker/picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-import {
-    MATCH_SPORTS,
-    getMatchSport,
-    type MatchSport,
-} from "@/constants/matchSports";
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -72,21 +66,27 @@ const PURPOSE_OPTIONS = [
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 const TIMES = ["Mor", "Aft", "Eve"];
 
-function resolveInitialSportId(
-  sportId: string | undefined,
-  sportName: string | undefined,
-  sportEmoji: string | undefined
-): string {
-  if (sportId && getMatchSport(sportId)) return sportId;
-  if (sportName || sportEmoji) {
-    const byName = MATCH_SPORTS.find(
-      (s) => s.name.toLowerCase() === (sportName ?? "").toLowerCase()
-    );
-    if (byName) return byName.id;
-    const byEmoji = MATCH_SPORTS.find((s) => s.emoji === sportEmoji);
-    if (byEmoji) return byEmoji.id;
-  }
-  return MATCH_SPORTS[0]?.id ?? "tennis";
+type SportItem = {
+  id: string;
+  label: string;
+  emoji: string;
+};
+
+const SPORTS: SportItem[] = [
+  { id: "tennis", label: "Tennis", emoji: "🎾" },
+  { id: "basketball", label: "Basketball", emoji: "🏀" },
+  { id: "soccer", label: "Soccer", emoji: "⚽" },
+  { id: "badminton", label: "Badminton", emoji: "🏸" },
+  { id: "table_tennis", label: "Table Tennis", emoji: "🏓" },
+  { id: "volleyball", label: "Volleyball", emoji: "🏐" },
+  { id: "squash", label: "Squash", emoji: "🎯" },
+  { id: "golf", label: "Golf", emoji: "⛳" },
+];
+
+function paramString(value: string | string[] | undefined): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && value[0]) return String(value[0]);
+  return undefined;
 }
 
 const DISTANCE_TICKS = [1, 10, 25, 50] as const;
@@ -152,27 +152,39 @@ function SliderWithScale({
 export default function MatchFilterScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{
-    sportId?: string;
-    sportName?: string;
-    sportEmoji?: string;
-  }>();
+  const { sport, sportLabel, sportEmoji, sportId, sportName } =
+    useLocalSearchParams<{
+      sport?: string;
+      sportLabel?: string;
+      sportEmoji?: string;
+      sportId?: string;
+      sportName?: string;
+    }>();
 
-  const initialId = useMemo(
-    () =>
-      resolveInitialSportId(params.sportId, params.sportName, params.sportEmoji),
-    [params.sportId, params.sportName, params.sportEmoji]
-  );
-
-  const [selectedSportId, setSelectedSportId] = useState(initialId);
-  const selectedSport: MatchSport = useMemo(
-    () => getMatchSport(selectedSportId) ?? MATCH_SPORTS[0],
-    [selectedSportId]
-  );
+  const [selectedSport, setSelectedSport] = useState<SportItem>(() => {
+    const routeSportId = paramString(sport) ?? paramString(sportId);
+    const byId = routeSportId
+      ? SPORTS.find((s) => s.id === routeSportId)
+      : undefined;
+    if (byId) return byId;
+    const emoji = paramString(sportEmoji);
+    if (emoji) {
+      const byEmoji = SPORTS.find((s) => s.emoji === emoji);
+      if (byEmoji) return byEmoji;
+    }
+    const name = paramString(sportLabel) ?? paramString(sportName);
+    if (name) {
+      const byName = SPORTS.find(
+        (s) => s.label.toLowerCase() === name.toLowerCase()
+      );
+      if (byName) return byName;
+    }
+    return SPORTS[0];
+  });
 
   const skillOptions = useMemo(
-    () => SKILL_LEVELS[selectedSportId] ?? SKILL_LEVELS.tennis,
-    [selectedSportId]
+    () => SKILL_LEVELS[selectedSport.id] ?? SKILL_LEVELS.tennis,
+    [selectedSport.id]
   );
 
   const [skillLevel, setSkillLevel] = useState<string>(
@@ -205,17 +217,6 @@ export default function MatchFilterScreen() {
     console.log("[match-filter] allFilled", allFilled);
   }, [allFilled]);
 
-  const sportEmoji = useMemo(() => {
-    const fromParam =
-      typeof params.sportEmoji === "string" && params.sportEmoji.trim().length > 0
-        ? params.sportEmoji.trim()
-        : undefined;
-    if (allFilled) {
-      return fromParam ?? selectedSport.emoji;
-    }
-    return fromParam ?? "🎯";
-  }, [allFilled, params.sportEmoji, selectedSport.emoji]);
-
   const toggleCell = (day: number, time: number) => {
     const key = `${day}-${time}`;
     setAvailability((prev) => {
@@ -231,7 +232,7 @@ export default function MatchFilterScreen() {
   }, [router]);
 
   const onStartMatching = useCallback(() => {
-    const sportLabel = `${selectedSport.name} ${selectedSport.emoji}`;
+    const sportLabel = `${selectedSport.label} ${selectedSport.emoji}`;
     const availabilityList = [...availability].sort();
 
     router.push({
@@ -277,7 +278,7 @@ export default function MatchFilterScreen() {
           </Pressable>
           <View style={styles.titleTextCol}>
             <Text style={styles.screenTitle}>
-              {selectedSport.emoji} {selectedSport.name}
+              {selectedSport.emoji} {selectedSport.label}
             </Text>
             <Text style={styles.screenSubtitle}>Set your match filters</Text>
           </View>
@@ -290,12 +291,12 @@ export default function MatchFilterScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.sportChipRow}
           >
-            {MATCH_SPORTS.map((s) => {
-              const selected = s.id === selectedSportId;
+            {SPORTS.map((s) => {
+              const selected = s.id === selectedSport.id;
               return (
                 <Pressable
                   key={s.id}
-                  onPress={() => setSelectedSportId(s.id)}
+                  onPress={() => setSelectedSport(s)}
                   style={({ pressed }) => [
                     styles.sportChip,
                     selected ? styles.sportChipSelected : styles.sportChipUnselected,
@@ -309,7 +310,7 @@ export default function MatchFilterScreen() {
                       selected ? styles.sportChipLabelSelected : styles.sportChipLabelUnselected,
                     ]}
                   >
-                    {s.name}
+                    {s.label}
                   </Text>
                 </Pressable>
               );
@@ -492,7 +493,7 @@ export default function MatchFilterScreen() {
               color: allFilled ? "#15803d" : "#94a3b8",
             }}
           >
-            {`${sportEmoji} Start Matching`}
+            {selectedSport.emoji} Start Matching
           </Text>
         </Pressable>
         {!allFilled ? (
