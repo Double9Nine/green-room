@@ -13,6 +13,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { SKILL_LEVELS } from "@/constants/skillLevels";
+import { mergeUserProfile } from "@/lib/profileStorage";
+
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
 const TEXT = "#0f172a";
@@ -21,32 +24,6 @@ const ACCENT_DARK = "#15803d";
 const BORDER_SOFT = "#bbf7d0";
 const BORDER_CARD = "#dcfce7";
 const CONTENT_TEXT = "#0f172a";
-
-const SKILL_LEVELS: Record<string, string[]> = {
-  tennis: [
-    "1.5 - New Player",
-    "2.0 - Beginner",
-    "2.5 - Beginner+",
-    "3.0 - Intermediate",
-    "3.5 - Intermediate+",
-    "4.0 - Advanced",
-    "4.5 - Advanced+",
-    "5.0 - Expert",
-  ],
-  basketball: ["Beginner", "Recreational", "Intermediate", "Advanced", "Semi-Pro"],
-  soccer: ["Beginner", "Recreational", "Intermediate", "Advanced", "Semi-Pro"],
-  volleyball: ["Beginner", "Recreational", "Intermediate", "Advanced", "Semi-Pro"],
-  badminton: ["Beginner", "Intermediate", "Advanced", "Expert"],
-  table_tennis: ["Beginner", "Intermediate", "Advanced", "Expert"],
-  squash: ["Beginner", "Intermediate", "Advanced", "Expert"],
-  golf: [
-    "Beginner (30+ Handicap)",
-    "High Handicap (20-30)",
-    "Mid Handicap (10-20)",
-    "Low Handicap (0-10)",
-    "Scratch / Pro",
-  ],
-};
 
 const GENDER_OPTIONS = [
   "Everyone Welcome 🤝",
@@ -234,6 +211,12 @@ export default function MatchFilterScreen() {
   const onStartMatching = useCallback(() => {
     const sportLabel = `${selectedSport.label} ${selectedSport.emoji}`;
     const availabilityList = [...availability].sort();
+
+    void mergeUserProfile({
+      sport: selectedSport.id,
+      skillLevel,
+      availability: availabilityList,
+    });
 
     router.push({
       pathname: "/match-results",

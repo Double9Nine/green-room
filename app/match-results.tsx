@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
@@ -5,11 +6,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   Animated,
   Dimensions,
+  FlatList,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -17,12 +18,14 @@ import {
 
 import { getMatchSport } from "@/constants/matchSports";
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
-const CARD_GAP = 14;
-const CARD_WIDTH = 272;
-const CARD_WIDTH_SIDE = 232;
-const SNAP_INTERVAL = CARD_WIDTH + CARD_GAP;
-const SIDE_PADDING = (SCREEN_WIDTH - CARD_WIDTH) / 2;
+const { width, height } = Dimensions.get("window");
+const CARD_WIDTH = width * 0.71;
+const CARD_HEIGHT = height * 0.59;
+const CARD_MARGIN = 16;
+const SNAP_INTERVAL = CARD_WIDTH + CARD_MARGIN;
+const SIDE_PADDING = (width - CARD_WIDTH) / 2;
+
+const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Player>);
 
 const GOLD = "#d4af37";
 const DARK_GREEN = "#052e16";
@@ -50,6 +53,7 @@ type Player = {
   skill: string;
   availability: string;
   purpose: string;
+  tags: string[];
   photo: string | null;
 };
 
@@ -61,7 +65,8 @@ const DUMMY_PLAYERS: Player[] = [
     location: "Jersey City, NJ",
     skill: "3.5 - Intermediate+",
     availability: "Weekends/Eves",
-    purpose: "Level Up My Game 🏆",
+    purpose: "Trying to level up 🏆",
+    tags: ["Low-key competitive", "Won't flake"],
     photo: null,
   },
   {
@@ -71,7 +76,8 @@ const DUMMY_PLAYERS: Player[] = [
     location: "Manhattan, NY",
     skill: "3.0 - Intermediate",
     availability: "Weekday Eves",
-    purpose: "Ride or Die Partner 🤝",
+    purpose: "Looking for my go-to partner 🤝",
+    tags: ["Chill vibes only", "Good banter"],
     photo: null,
   },
   {
@@ -81,7 +87,8 @@ const DUMMY_PLAYERS: Player[] = [
     location: "Hoboken, NJ",
     skill: "4.0 - Advanced",
     availability: "Weekends",
-    purpose: "Here for the Vibes 😎",
+    purpose: "Just here to meet people 😎",
+    tags: ["Social cardio", "Shows up"],
     photo: null,
   },
   {
@@ -91,7 +98,8 @@ const DUMMY_PLAYERS: Player[] = [
     location: "Brooklyn, NY",
     skill: "2.5 - Beginner+",
     availability: "Mornings",
-    purpose: "Keeping It Moving 🏃",
+    purpose: "Just trying to stay active 🏃",
+    tags: ["Beginner-friendly", "No pressure"],
     photo: null,
   },
   {
@@ -101,7 +109,8 @@ const DUMMY_PLAYERS: Player[] = [
     location: "Queens, NY",
     skill: "3.5 - Intermediate+",
     availability: "Flexible",
-    purpose: "Level Up My Game 🏆",
+    purpose: "Trying to level up 🏆",
+    tags: ["Down for a challenge", "Chatty", "Won't flake"],
     photo: null,
   },
   {
@@ -111,7 +120,8 @@ const DUMMY_PLAYERS: Player[] = [
     location: "Weehawken, NJ",
     skill: "4.5 - Advanced+",
     availability: "Weekends",
-    purpose: "Ride or Die Partner 🤝",
+    purpose: "Looking for my go-to partner 🤝",
+    tags: ["Low-key competitive", "Shows up"],
     photo: null,
   },
   {
@@ -121,7 +131,8 @@ const DUMMY_PLAYERS: Player[] = [
     location: "Union City, NJ",
     skill: "2.0 - Beginner",
     availability: "Evenings",
-    purpose: "Here for the Vibes 😎",
+    purpose: "Just here to meet people 😎",
+    tags: ["Chill vibes only", "Beginner-friendly"],
     photo: null,
   },
   {
@@ -131,7 +142,8 @@ const DUMMY_PLAYERS: Player[] = [
     location: "Fort Lee, NJ",
     skill: "3.0 - Intermediate",
     availability: "Weekends/Eves",
-    purpose: "Keeping It Moving 🏃",
+    purpose: "Other ✨",
+    tags: ["Good banter", "No pressure", "Social cardio"],
     photo: null,
   },
 ];
@@ -266,18 +278,22 @@ function PlayerCard({
   onMessageAndPlan,
   onSkip,
 }: PlayerCardProps) {
-  const cardWidth = featured ? CARD_WIDTH : CARD_WIDTH_SIDE;
   const levelLabel = getLevelLabel(player.skill);
 
   return (
     <View
       style={[
         styles.cardOuter,
-        { width: cardWidth },
+        { width: CARD_WIDTH, height: CARD_HEIGHT },
         featured && styles.cardOuterFeatured,
       ]}
     >
-      <View style={[styles.cardGoldFrame, { width: cardWidth }]}>
+      <View
+        style={[
+          styles.cardGoldFrame,
+          { width: CARD_WIDTH, height: CARD_HEIGHT },
+        ]}
+      >
         <LinearGradient
           colors={[...CARD_GRADIENT]}
           style={styles.cardGradient}
@@ -321,7 +337,7 @@ function PlayerCard({
               <View style={styles.statsSection}>
                 <StatRow icon="🎯" label="Skill" value={player.skill} />
                 <StatRow icon="📅" label="Avail" value={player.availability} />
-                <StatRow icon="🎪" label="Vibe" value={player.purpose} />
+                <PlayerPurposeAndTags player={player} />
               </View>
 
               <View style={styles.cardActions}>
@@ -365,21 +381,83 @@ function StatRow({
   );
 }
 
+function formatTagsLine(tags: string[]) {
+  if (tags.length === 0) return "—";
+  const visible = tags.slice(0, 2);
+  const line = visible.join(" • ");
+  if (tags.length > 2) {
+    return `${line} • +${tags.length - 2} more`;
+  }
+  return line;
+}
+
+function PlayerPurposeAndTags({ player }: { player: Player }) {
+  const visibleTags = player.tags.slice(0, 2);
+  const extraTagCount = Math.max(0, player.tags.length - visibleTags.length);
+
+  return (
+    <View style={styles.profileFieldsSection}>
+      <Text style={styles.fieldHeading}>Purpose</Text>
+      <View style={styles.purposePill}>
+        <Text style={styles.purposePillText} numberOfLines={2}>
+          {player.purpose || "—"}
+        </Text>
+      </View>
+
+      <Text style={styles.fieldHeading}>Vibe</Text>
+      {visibleTags.length > 0 ? (
+        <View style={styles.tagsRow}>
+          {visibleTags.map((tag) => (
+            <View key={tag} style={styles.tagPill}>
+              <Text style={styles.tagPillText} numberOfLines={1}>
+                {tag}
+              </Text>
+            </View>
+          ))}
+          {extraTagCount > 0 ? (
+            <Text style={styles.moreTagsText}>+{extraTagCount} more</Text>
+          ) : null}
+        </View>
+      ) : (
+        <Text style={styles.statLine}>
+          <Text style={styles.statValue}>{formatTagsLine(player.tags)}</Text>
+        </Text>
+      )}
+    </View>
+  );
+}
+
 type AnimatedPlayerCardProps = Omit<PlayerCardProps, "onSkip"> & {
   index: number;
+  scrollX: Animated.Value;
   onRemoveComplete: (id: number) => void;
 };
 
 function AnimatedPlayerCard({
   index,
+  scrollX,
   onRemoveComplete,
   ...cardProps
 }: AnimatedPlayerCardProps) {
-  const { player, featured } = cardProps;
+  const { player } = cardProps;
   const translateX = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(36)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(1)).current;
+  const skipScale = useRef(new Animated.Value(1)).current;
+
+  const inputRange = [
+    (index - 1) * SNAP_INTERVAL,
+    index * SNAP_INTERVAL,
+    (index + 1) * SNAP_INTERVAL,
+  ];
+
+  const carouselScale = scrollX.interpolate({
+    inputRange,
+    outputRange: [0.82, 1.08, 0.82],
+    extrapolate: "clamp",
+  });
+
+  const scale = Animated.multiply(carouselScale, skipScale);
 
   useEffect(() => {
     Animated.parallel([
@@ -410,7 +488,7 @@ function AnimatedPlayerCard({
         duration: 300,
         useNativeDriver: true,
       }),
-      Animated.timing(scale, {
+      Animated.timing(skipScale, {
         toValue: 0.88,
         duration: 300,
         useNativeDriver: true,
@@ -423,14 +501,14 @@ function AnimatedPlayerCard({
   return (
     <Animated.View
       style={{
-        marginRight: CARD_GAP,
-        transform: [{ translateX }, { translateY }, { scale }],
+        width: CARD_WIDTH,
+        transform: [{ translateX }, { translateY }],
         opacity,
       }}
     >
-      <View style={{ transform: [{ scale: featured ? 1.05 : 0.94 }] }}>
+      <Animated.View style={{ transform: [{ scale }] }}>
         <PlayerCard {...cardProps} onSkip={handleSkip} />
-      </View>
+      </Animated.View>
     </Animated.View>
   );
 }
@@ -444,7 +522,25 @@ export default function MatchResultsScreen() {
 
   const [players, setPlayers] = useState<Player[]>(DUMMY_PLAYERS);
   const [activeIndex, setActiveIndex] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+  const [userPurpose, setUserPurpose] = useState("");
+  const [userTags, setUserTags] = useState<string[]>([]);
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const listRef = useRef<FlatList<Player>>(null);
+
+  useEffect(() => {
+    void AsyncStorage.getItem("userProfile").then((val) => {
+      if (val) {
+        const p = JSON.parse(val) as { purpose?: string; tags?: string[] };
+        setUserPurpose(p.purpose || "");
+        setUserTags(Array.isArray(p.tags) ? p.tags : []);
+      }
+    });
+  }, []);
+
+  const snapOffsets = useMemo(
+    () => players.map((_, i) => i * SNAP_INTERVAL),
+    [players.length]
+  );
 
   const sportDisplay = useMemo(
     () =>
@@ -475,12 +571,24 @@ export default function MatchResultsScreen() {
     [router, selectedSportEmoji]
   );
 
-  const handleScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const x = e.nativeEvent.contentOffset.x;
-    const index = Math.round(x / SNAP_INTERVAL);
-    const clamped = Math.max(0, Math.min(index, players.length - 1));
-    if (clamped !== activeIndex) setActiveIndex(clamped);
-  };
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const x = e.nativeEvent.contentOffset.x;
+      const index = Math.round(x / SNAP_INTERVAL);
+      const clamped = Math.max(0, Math.min(index, players.length - 1));
+      if (clamped !== activeIndex) setActiveIndex(clamped);
+    },
+    [activeIndex, players.length]
+  );
+
+  const onScroll = useMemo(
+    () =>
+      Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
+        useNativeDriver: true,
+        listener: handleScroll,
+      }),
+    [scrollX, handleScroll]
+  );
 
   const removePlayer = (id: number) => {
     setPlayers((prev) => prev.filter((p) => p.id !== id));
@@ -526,29 +634,42 @@ export default function MatchResultsScreen() {
               <Text style={styles.emptyText}>No players left to show</Text>
             </View>
           ) : (
-            <ScrollView
-              ref={scrollRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              snapToInterval={SNAP_INTERVAL}
-              decelerationRate="fast"
-              contentContainerStyle={styles.carouselContent}
-              onScroll={handleScroll}
-              scrollEventThrottle={16}
-            >
-              {players.map((player, index) => (
-                <AnimatedPlayerCard
-                  key={player.id}
-                  index={index}
-                  player={player}
-                  sportName={sportDisplay.name}
-                  sportEmoji={sportDisplay.emoji}
-                  featured={index === activeIndex}
-                  onMessageAndPlan={() => openChat(player)}
-                  onRemoveComplete={removePlayer}
-                />
-              ))}
-            </ScrollView>
+            <View style={styles.carouselWrap}>
+              <AnimatedFlatList
+                ref={listRef}
+                data={players}
+                keyExtractor={(item) => String(item.id)}
+                extraData={activeIndex}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                snapToOffsets={snapOffsets}
+                decelerationRate="fast"
+                disableIntervalMomentum
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                style={{ width }}
+                contentContainerStyle={{
+                  paddingHorizontal: SIDE_PADDING,
+                  paddingVertical: 20,
+                  alignItems: "center",
+                }}
+                ItemSeparatorComponent={() => (
+                  <View style={{ width: CARD_MARGIN }} />
+                )}
+                renderItem={({ item, index }) => (
+                  <AnimatedPlayerCard
+                    index={index}
+                    scrollX={scrollX}
+                    player={item}
+                    sportName={sportDisplay.name}
+                    sportEmoji={sportDisplay.emoji}
+                    featured={index === activeIndex}
+                    onMessageAndPlan={() => openChat(item)}
+                    onRemoveComplete={removePlayer}
+                  />
+                )}
+              />
+            </View>
           )}
         </View>
       </SparkleBackground>
@@ -593,10 +714,10 @@ const styles = StyleSheet.create({
     color: GOLD,
     marginTop: 6,
   },
-  carouselContent: {
-    paddingHorizontal: SIDE_PADDING,
-    paddingVertical: 20,
-    alignItems: "center",
+  carouselWrap: {
+    width,
+    alignSelf: "center",
+    marginTop: 60,
   },
   emptyWrap: {
     flex: 1,
@@ -635,7 +756,7 @@ const styles = StyleSheet.create({
   cardGradient: {
     borderRadius: 18,
     overflow: "hidden",
-    minHeight: 500,
+    minHeight: CARD_HEIGHT,
   },
   cardInnerBorder: {
     flex: 1,
@@ -644,7 +765,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#86efac",
     overflow: "hidden",
-    minHeight: 496,
+    minHeight: CARD_HEIGHT - 4,
   },
   stripeOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -771,6 +892,56 @@ const styles = StyleSheet.create({
   statValue: {
     color: "#ffffff",
     fontWeight: "500",
+  },
+  profileFieldsSection: {
+    gap: 6,
+    marginTop: 2,
+  },
+  fieldHeading: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: GOLD,
+  },
+  purposePill: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(212, 175, 55, 0.22)",
+    borderWidth: 1,
+    borderColor: GOLD,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    maxWidth: "100%",
+  },
+  purposePillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: GOLD,
+  },
+  tagsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+  },
+  tagPill: {
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(212, 175, 55, 0.55)",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    maxWidth: "48%",
+  },
+  tagPillText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#ffffff",
+  },
+  moreTagsText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: GOLD,
+    fontStyle: "italic",
   },
   cardActions: {
     flexDirection: "row",

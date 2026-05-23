@@ -1,3 +1,4 @@
+import "react-native-gesture-handler";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
@@ -34,6 +35,14 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="player-profile"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="edit-profile"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="my-player-card"
           options={{ headerShown: false }}
         />
       </Stack>

@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import {
+  Alert,
+  Animated,
   Platform,
   Pressable,
   ScrollView,
@@ -10,12 +12,17 @@ import {
   Text,
   View,
 } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import Swipeable from "react-native-gesture-handler/Swipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   loadStoredConversations,
+  removeConversation,
   type StoredConversation,
 } from "@/lib/conversationsStorage";
+
+const MUTED_CONVERSATIONS_KEY = "mutedConversations";
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -24,6 +31,8 @@ const MUTED = "#64748b";
 const BORDER = "#e2e8f0";
 const ACCENT = "#22c55e";
 const ACCENT_DARK = "#15803d";
+const ACTION_WIDTH = 70;
+const SWIPE_ACTIONS_WIDTH = ACTION_WIDTH * 2;
 
 function formatConversationTime(timestamp: number) {
   const date = new Date(timestamp);
@@ -40,10 +49,100 @@ function formatConversationTime(timestamp: number) {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function ConversationRow({
+  convo,
+  isMuted,
+  onPress,
+  swipeableRef,
+  onSwipeableWillOpen,
+  renderRightActions,
+}: {
+  convo: StoredConversation;
+  isMuted: boolean;
+  onPress: () => void;
+  swipeableRef: (ref: Swipeable | null) => void;
+  onSwipeableWillOpen: () => void;
+  renderRightActions: () => ReactNode;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const animateScale = (toValue: number) => {
+    Animated.spring(scale, {
+      toValue,
+      friction: 8,
+      tension: 120,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const showUnread = convo.unread && !isMuted;
+
+  return (
+    <View style={styles.swipeRow}>
+      <Swipeable
+        ref={swipeableRef}
+        renderRightActions={renderRightActions}
+        friction={2}
+        rightThreshold={40}
+        overshootRight={false}
+        onSwipeableWillOpen={onSwipeableWillOpen}
+      >
+        <Animated.View style={[styles.convoCard, { transform: [{ scale }] }]}>
+          <Pressable
+            onPress={onPress}
+            onPressIn={() => animateScale(0.97)}
+            onPressOut={() => animateScale(1)}
+            style={styles.cardPressable}
+          >
+            <View style={styles.avatar}>
+              <Ionicons name="person" size={24} color={ACCENT_DARK} />
+            </View>
+            <View style={styles.convoBody}>
+              <View style={styles.convoTop}>
+                <View style={styles.nameRow}>
+                  <Text style={styles.convoName} numberOfLines={1}>
+                    {convo.playerName}
+                  </Text>
+                  {isMuted ? (
+                    <Ionicons
+                      name="notifications-off-outline"
+                      size={16}
+                      color={MUTED}
+                    />
+                  ) : null}
+                  <Text style={styles.nameSportEmoji}>{convo.sportEmoji}</Text>
+                </View>
+                <View style={styles.timeCol}>
+                  <Text style={styles.convoTime}>
+                    {formatConversationTime(convo.lastMessageTime)}
+                  </Text>
+                  {showUnread ? <View style={styles.unreadDot} /> : null}
+                </View>
+              </View>
+              <Text style={styles.convoPreview} numberOfLines={1}>
+                {convo.lastMessage}
+              </Text>
+              {convo.playerLocation || convo.playerSkill ? (
+                <Text style={styles.convoMeta} numberOfLines={1}>
+                  {[convo.playerSkill, convo.playerLocation]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </Text>
+              ) : null}
+            </View>
+          </Pressable>
+        </Animated.View>
+      </Swipeable>
+    </View>
+  );
+}
+
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [conversations, setConversations] = useState<StoredConversation[]>([]);
+  const [mutedIds, setMutedIds] = useState<string[]>([]);
+  const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
 
   useFocusEffect(
     useCallback(() => {
@@ -52,10 +151,34 @@ export default function ChatScreen() {
         setConversations(convos);
       };
       void loadConversations();
+
+      AsyncStorage.getItem(MUTED_CONVERSATIONS_KEY).then((val) => {
+        if (val) {
+          try {
+            const parsed = JSON.parse(val) as string[];
+            setMutedIds(Array.isArray(parsed) ? parsed : []);
+          } catch {
+            setMutedIds([]);
+          }
+        } else {
+          setMutedIds([]);
+        }
+      });
     }, [])
   );
 
+  const closeAllSwipeables = useCallback(() => {
+    Object.values(swipeableRefs.current).forEach((ref) => ref?.close());
+  }, []);
+
+  const closeOtherSwipeables = useCallback((openId: string) => {
+    Object.entries(swipeableRefs.current).forEach(([id, ref]) => {
+      if (id !== openId) ref?.close();
+    });
+  }, []);
+
   const openConversation = (convo: StoredConversation) => {
+    closeAllSwipeables();
     router.push({
       pathname: "/chat-conversation",
       params: {
@@ -70,13 +193,79 @@ export default function ChatScreen() {
     });
   };
 
+  const handleMute = useCallback(async (id: string) => {
+    swipeableRefs.current[id]?.close();
+    setMutedIds((prev) => {
+      const isCurrentlyMuted = prev.includes(id);
+      const next = isCurrentlyMuted
+        ? prev.filter((i) => i !== id)
+        : [...prev, id];
+      void AsyncStorage.setItem(MUTED_CONVERSATIONS_KEY, JSON.stringify(next));
+      if (!isCurrentlyMuted) {
+        setConversations((current) =>
+          current.map((c) => (c.id === id ? { ...c, unread: false } : c))
+        );
+      }
+      return next;
+    });
+  }, []);
+
+  const handleDelete = useCallback((convo: StoredConversation) => {
+    swipeableRefs.current[convo.id]?.close();
+    Alert.alert(
+      "Delete this conversation?",
+      "This will remove the chat from your list",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              await removeConversation(convo.id);
+              setConversations((prev) => prev.filter((c) => c.id !== convo.id));
+              delete swipeableRefs.current[convo.id];
+            })();
+          },
+        },
+      ]
+    );
+  }, []);
+
+  const renderRightActions = useCallback(
+    (convo: StoredConversation) => () => {
+      const isMuted = mutedIds.includes(convo.id);
+
+      return (
+        <View style={styles.actionsRow}>
+          <Pressable
+            style={isMuted ? styles.unmuteAction : styles.muteAction}
+            onPress={() => void handleMute(convo.id)}
+          >
+            <Ionicons
+              name={
+                isMuted ? "notifications-outline" : "notifications-off-outline"
+              }
+              size={22}
+              color="#ffffff"
+            />
+            <Text style={styles.actionLabel}>{isMuted ? "Unmute" : "Mute"}</Text>
+          </Pressable>
+          <Pressable
+            style={styles.deleteAction}
+            onPress={() => handleDelete(convo)}
+          >
+            <Ionicons name="trash-outline" size={22} color="#ffffff" />
+            <Text style={styles.actionLabel}>Delete</Text>
+          </Pressable>
+        </View>
+      );
+    },
+    [handleDelete, handleMute, mutedIds]
+  );
+
   return (
-    <LinearGradient
-      colors={[BG, "#ecfdf5"]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 0, y: 1 }}
-      style={styles.gradient}
-    >
+    <GestureHandlerRootView style={styles.screen}>
       <ScrollView
         contentContainerStyle={[
           styles.content,
@@ -86,6 +275,7 @@ export default function ChatScreen() {
           },
         ]}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={closeAllSwipeables}
       >
         <Text style={styles.title}>Chat</Text>
         <Text style={styles.subtitle}>
@@ -114,53 +304,29 @@ export default function ChatScreen() {
         ) : (
           <View style={styles.list}>
             {conversations.map((convo) => (
-              <Pressable
+              <ConversationRow
                 key={convo.id}
+                convo={convo}
+                isMuted={mutedIds.includes(convo.id)}
+                swipeableRef={(ref) => {
+                  swipeableRefs.current[convo.id] = ref;
+                }}
+                onSwipeableWillOpen={() => closeOtherSwipeables(convo.id)}
+                renderRightActions={renderRightActions(convo)}
                 onPress={() => openConversation(convo)}
-                style={({ pressed }) => [
-                  styles.convoRow,
-                  pressed && styles.convoRowPressed,
-                ]}
-              >
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarEmoji}>{convo.sportEmoji}</Text>
-                </View>
-                <View style={styles.convoBody}>
-                  <View style={styles.convoTop}>
-                    <Text style={styles.convoName} numberOfLines={1}>
-                      {convo.playerName}
-                    </Text>
-                    <Text style={styles.convoTime}>
-                      {formatConversationTime(convo.lastMessageTime)}
-                    </Text>
-                  </View>
-                  <View style={styles.convoBottom}>
-                    <Text style={styles.convoPreview} numberOfLines={1}>
-                      {convo.lastMessage}
-                    </Text>
-                    {convo.unread ? <View style={styles.unreadDot} /> : null}
-                  </View>
-                  {convo.playerLocation || convo.playerSkill ? (
-                    <Text style={styles.convoMeta} numberOfLines={1}>
-                      {[convo.playerSkill, convo.playerLocation]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </Text>
-                  ) : null}
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={MUTED} />
-              </Pressable>
+              />
             ))}
           </View>
         )}
       </ScrollView>
-    </LinearGradient>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: {
+  screen: {
     flex: 1,
+    backgroundColor: BG,
   },
   content: {
     paddingHorizontal: 24,
@@ -249,32 +415,65 @@ const styles = StyleSheet.create({
   },
   list: {
     marginTop: 24,
+    alignSelf: "stretch",
     width: "100%",
-    maxWidth: 400,
-    gap: 10,
   },
-  convoRow: {
+  swipeRow: {
+    marginVertical: 6,
+    alignSelf: "stretch",
+  },
+  actionsRow: {
+    flexDirection: "row",
+    width: SWIPE_ACTIONS_WIDTH,
+  },
+  muteAction: {
+    width: ACTION_WIDTH,
+    backgroundColor: "#f59e0b",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  unmuteAction: {
+    width: ACTION_WIDTH,
+    backgroundColor: "#64748b",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  deleteAction: {
+    width: ACTION_WIDTH,
+    backgroundColor: "#dc2626",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  actionLabel: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  convoCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: WHITE,
     borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: BORDER,
+    padding: 30,
+    alignSelf: "stretch",
+    borderLeftWidth: 4,
+    borderLeftColor: ACCENT_DARK,
     gap: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: TEXT,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-      },
-      android: { elevation: 2 },
-      default: {},
-    }),
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  convoRowPressed: {
-    opacity: 0.9,
+  cardPressable: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   avatar: {
     width: 48,
@@ -284,39 +483,44 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarEmoji: {
-    fontSize: 22,
-  },
   convoBody: {
     flex: 1,
     minWidth: 0,
-    gap: 2,
+    gap: 4,
   },
   convoTop: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 8,
   },
-  convoName: {
+  nameRow: {
     flex: 1,
-    fontSize: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 0,
+  },
+  convoName: {
+    flexShrink: 1,
+    fontSize: 17,
     fontWeight: "800",
     color: TEXT,
   },
+  nameSportEmoji: {
+    fontSize: 18,
+  },
+  timeCol: {
+    alignItems: "flex-end",
+    gap: 6,
+  },
   convoTime: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "600",
     color: MUTED,
   },
-  convoBottom: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
   convoPreview: {
-    flex: 1,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "600",
     color: MUTED,
   },

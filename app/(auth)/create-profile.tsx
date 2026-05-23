@@ -2,6 +2,8 @@ import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/dat
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useMemo, useState } from "react";
+
+import { mergeUserProfile } from "@/lib/profileStorage";
 import {
   Platform,
   Pressable,
@@ -78,6 +80,9 @@ export default function CreateProfileScreen() {
 
     setFormError("");
     setDobError("");
+    void mergeUserProfile({
+      name: fullName.trim(),
+    });
     router.push("/(auth)/additional-info" as never);
   };
 

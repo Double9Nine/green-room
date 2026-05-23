@@ -1360,7 +1360,7 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
   },
   bubbleText: {
-    fontSize: 15,
+    fontSize: 16,
     lineHeight: 21,
   },
   bubbleTextSent: {
@@ -1379,7 +1379,7 @@ const styles = StyleSheet.create({
     maxWidth: "88%",
   },
   convertedTranscriptText: {
-    fontSize: 14,
+    fontSize: 16,
     fontStyle: "italic",
     color: "#475569",
     lineHeight: 20,
@@ -1396,7 +1396,7 @@ const styles = StyleSheet.create({
   },
   locationBubbleText: {
     color: "#ffffff",
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "600",
     flexShrink: 1,
   },
@@ -1448,7 +1448,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   voiceMessageLine: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "600",
     color: "#0f172a",
     flexShrink: 1,

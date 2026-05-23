@@ -13,6 +13,7 @@ export type StoredConversation = {
   lastMessage: string;
   lastMessageTime: number;
   unread: boolean;
+  muted?: boolean;
 };
 
 export async function loadStoredConversations(): Promise<StoredConversation[]> {
@@ -59,7 +60,9 @@ export async function updateConversationPreview(
       ...convos[idx],
       lastMessage,
       lastMessageTime: Date.now(),
-      unread: options?.unread ?? convos[idx].unread,
+      unread: convos[idx].muted
+        ? false
+        : (options?.unread ?? convos[idx].unread),
     };
     convos.splice(idx, 1);
     convos.unshift(updated);
@@ -76,6 +79,34 @@ export async function markConversationRead(id: string): Promise<void> {
     if (idx === -1) return;
     convos[idx] = { ...convos[idx], unread: false };
     await saveConversations(convos);
+  } catch {
+    // ignore persistence errors
+  }
+}
+
+export async function setConversationMuted(
+  id: string,
+  muted: boolean
+): Promise<void> {
+  try {
+    const convos = await loadStoredConversations();
+    const idx = convos.findIndex((c) => c.id === id);
+    if (idx === -1) return;
+    convos[idx] = {
+      ...convos[idx],
+      muted,
+      unread: muted ? false : convos[idx].unread,
+    };
+    await saveConversations(convos);
+  } catch {
+    // ignore persistence errors
+  }
+}
+
+export async function removeConversation(id: string): Promise<void> {
+  try {
+    const convos = await loadStoredConversations();
+    await saveConversations(convos.filter((c) => c.id !== id));
   } catch {
     // ignore persistence errors
   }

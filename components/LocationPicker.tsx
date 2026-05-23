@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -33,6 +32,15 @@ function formatAutoLabel(place: Location.LocationGeocodedAddress): string {
 }
 
 function parseManualLabel(label: string): { region: RegionGroup; area: string } | null {
+  const commaParts = label.split(",").map((part) => part.trim());
+  if (commaParts.length === 2) {
+    const area = commaParts[0];
+    const region = commaParts[1] as RegionGroup;
+    if (area && (region === "New York City" || region === "New Jersey")) {
+      return { region, area };
+    }
+  }
+
   const match = label.match(/^(.*) \((New York City|New Jersey)\)\s*$/);
   if (!match) {
     return null;
@@ -47,9 +55,30 @@ function parseManualLabel(label: string): { region: RegionGroup; area: string } 
   return { region, area };
 }
 
-export function LocationPicker() {
-  const [mode, setMode] = useState<"none" | "auto" | "manual">("none");
-  const [label, setLabel] = useState("");
+type LocationPickerProps = {
+  initialLabel?: string;
+  onLabelChange?: (label: string) => void;
+};
+
+export function LocationPicker({
+  initialLabel,
+  onLabelChange,
+}: LocationPickerProps) {
+  const [mode, setMode] = useState<"none" | "auto" | "manual">(
+    initialLabel ? "manual" : "none"
+  );
+  const [label, setLabel] = useState(initialLabel || "");
+
+  useEffect(() => {
+    onLabelChange?.(label);
+  }, [label, onLabelChange]);
+
+  useEffect(() => {
+    setLabel(initialLabel || "");
+    if (initialLabel) {
+      setMode("manual");
+    }
+  }, [initialLabel]);
   const [error, setError] = useState("");
   const [isDetecting, setIsDetecting] = useState(false);
 
@@ -83,18 +112,16 @@ export function LocationPicker() {
     setManualOpen(true);
   };
 
-  const closeManualPicker = () => {
-    setManualOpen(false);
-  };
-
   const confirmManualSelection = () => {
     if (!tempArea) {
       return;
     }
 
+    const nextLabel = `${tempArea}, ${tempRegion}`;
     setError("");
     setMode("manual");
-    setLabel(`${tempArea} (${tempRegion})`);
+    setLabel(nextLabel);
+    onLabelChange?.(nextLabel);
     setManualOpen(false);
   };
 
@@ -133,7 +160,9 @@ export function LocationPicker() {
       }
 
       setLabel(nextLabel);
+      onLabelChange?.(nextLabel);
       setMode("auto");
+      setManualOpen(false);
     } catch {
       setError("Unable to fetch location right now");
     } finally {
@@ -195,74 +224,58 @@ export function LocationPicker() {
           </>
         ) : null}
 
+        {manualOpen ? (
+          <>
+            <View style={styles.divider} />
+            <View style={styles.wheelsCard}>
+              <View style={styles.wheelsRow}>
+                <View style={styles.wheelColumn}>
+                  <Text style={styles.wheelLabel}>Region</Text>
+                  <Picker
+                    selectedValue={tempRegion}
+                    onValueChange={(value) => setTempRegion(value as RegionGroup)}
+                    style={styles.wheel}
+                    itemStyle={styles.wheelItemIOS}
+                  >
+                    {REGIONS.map((region) => (
+                      <Picker.Item key={region} label={region} value={region} />
+                    ))}
+                  </Picker>
+                </View>
+
+                <View style={styles.wheelColumn}>
+                  <Text style={styles.wheelLabel}>Area</Text>
+                  <Picker
+                    selectedValue={tempArea}
+                    onValueChange={(value) => setTempArea(String(value))}
+                    style={styles.wheel}
+                    itemStyle={styles.wheelItemIOS}
+                  >
+                    {areaItems.map((area) => (
+                      <Picker.Item key={area} label={area} value={area} />
+                    ))}
+                  </Picker>
+                </View>
+              </View>
+
+              <Pressable
+                onPress={confirmManualSelection}
+                disabled={!tempArea}
+                style={({ pressed }) => [
+                  !tempArea && styles.confirmButtonDisabled,
+                  pressed && tempArea && styles.optionRowPressed,
+                ]}
+              >
+                <Text style={styles.confirmButtonText}>Confirm</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <Text style={styles.helperText}>Used to find players near you</Text>
       </View>
-
-      <Modal visible={manualOpen} transparent animationType="slide" onRequestClose={closeManualPicker}>
-        <View style={styles.modalRoot}>
-          <Pressable style={styles.modalBackdropTap} onPress={closeManualPicker} />
-
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeaderRow}>
-              <View style={styles.modalHeaderText}>
-                <Text style={styles.modalTitle}>Select your area</Text>
-                <Text style={styles.modalSubtitle}>Spin to choose, then confirm.</Text>
-              </View>
-              <Pressable
-                onPress={closeManualPicker}
-                hitSlop={10}
-                style={({ pressed }) => [styles.modalClose, pressed && styles.optionRowPressed]}
-              >
-                <Ionicons name="close" size={22} color="#14532d" />
-              </Pressable>
-            </View>
-
-            <View style={styles.wheelsCard}>
-              <View style={styles.wheelColumn}>
-                <Text style={styles.wheelLabel}>Region</Text>
-                <Picker
-                  selectedValue={tempRegion}
-                  onValueChange={(value) => setTempRegion(value as RegionGroup)}
-                  style={styles.wheel}
-                  itemStyle={styles.wheelItemIOS}
-                >
-                  {REGIONS.map((region) => (
-                    <Picker.Item key={region} label={region} value={region} />
-                  ))}
-                </Picker>
-              </View>
-
-              <View style={styles.wheelColumn}>
-                <Text style={styles.wheelLabel}>Area</Text>
-                <Picker
-                  selectedValue={tempArea}
-                  onValueChange={(value) => setTempArea(String(value))}
-                  style={styles.wheel}
-                  itemStyle={styles.wheelItemIOS}
-                >
-                  {areaItems.map((area) => (
-                    <Picker.Item key={area} label={area} value={area} />
-                  ))}
-                </Picker>
-              </View>
-            </View>
-
-            <Pressable
-              onPress={confirmManualSelection}
-              disabled={!tempArea}
-              style={({ pressed }) => [
-                styles.confirmButton,
-                !tempArea && styles.confirmButtonDisabled,
-                pressed && tempArea && styles.optionRowPressed,
-              ]}
-            >
-              <Text style={styles.confirmButtonText}>Confirm</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -354,55 +367,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
   },
-  modalRoot: {
-    flex: 1,
-    backgroundColor: "rgba(2, 44, 34, 0.45)",
-    justifyContent: "flex-end",
-    padding: 16,
-  },
-  modalBackdropTap: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  modalCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "rgba(20,83,45,0.18)",
-    gap: 12,
-  },
-  modalHeaderRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-  },
-  modalHeaderText: {
-    flex: 1,
-  },
-  modalClose: {
-    padding: 6,
-    borderRadius: 999,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#052e16",
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#166534",
-  },
   wheelsCard: {
-    flexDirection: "row",
-    gap: 10,
+    gap: 0,
     backgroundColor: "#ffffff",
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(20,83,45,0.18)",
     paddingHorizontal: 6,
     paddingTop: 8,
-    paddingBottom: 4,
+    paddingBottom: 12,
+  },
+  wheelsRow: {
+    flexDirection: "row",
+    gap: 10,
   },
   wheelColumn: {
     flex: 1,
@@ -424,20 +401,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     height: 180,
   },
-  confirmButton: {
-    borderRadius: 999,
-    backgroundColor: "#15803d",
-    borderWidth: 2,
-    borderColor: "#14532d",
-    paddingVertical: 14,
-  },
   confirmButtonDisabled: {
     opacity: 0.45,
   },
   confirmButtonText: {
+    color: "#15803d",
+    fontSize: 15,
+    fontWeight: "700",
     textAlign: "center",
-    color: "#ffffff",
-    fontWeight: "900",
-    fontSize: 16,
+    marginTop: 12,
   },
 });

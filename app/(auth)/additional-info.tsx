@@ -5,11 +5,13 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-
 
 import { LocationPicker } from "@/components/LocationPicker";
 import { PhotoPicker } from "@/components/PhotoPicker";
+import { mergeUserProfile } from "@/lib/profileStorage";
 
 export default function AdditionalInfoScreen() {
   const [occupation, setOccupation] = useState("");
   const [university, setUniversity] = useState("");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [locationLabel, setLocationLabel] = useState("");
 
   return (
     <LinearGradient colors={["#22c55e", "#16a34a"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.screen}>
@@ -56,11 +58,19 @@ export default function AdditionalInfoScreen() {
         </View>
 
         <View style={styles.fieldGroup}>
-          <LocationPicker />
+          <LocationPicker onLabelChange={setLocationLabel} />
         </View>
 
         <Pressable
-          onPress={() => router.push("/(tabs)/match")}
+          onPress={() => {
+            void mergeUserProfile({
+              work: occupation.trim(),
+              university: university.trim(),
+              photo: photoUri,
+              location: locationLabel,
+            });
+            router.push("/(tabs)/match");
+          }}
           style={({ pressed }) => [styles.completeButton, pressed && styles.actionButtonPressed]}
         >
           <Text style={styles.completeButtonText}>Complete Profile</Text>
