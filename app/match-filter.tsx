@@ -2,18 +2,26 @@ import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import { Picker } from "@react-native-picker/picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Animated,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { SKILL_LEVELS } from "@/constants/skillLevels";
+import {
+  RUNNING_SKILL_LEVELS_KM,
+  RUNNING_SKILL_LEVELS_MI,
+  SKILL_LEVEL_REFERENCE_URLS,
+  SKILL_LEVELS,
+  SPORTS,
+} from "@/constants/skillLevels";
 import { mergeUserProfile } from "@/lib/profileStorage";
 
 const BG = "#f0fdf4";
@@ -43,22 +51,20 @@ const PURPOSE_OPTIONS = [
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 const TIMES = ["Mor", "Aft", "Eve"];
 
-type SportItem = {
-  id: string;
-  label: string;
-  emoji: string;
+const GOLF_SCENE_LABELS: Record<string, string> = {
+  driving_range: "Driving range only",
+  "9_hole": "9-hole round",
+  "18_hole": "18-hole round",
+  either: "Either",
 };
 
-const SPORTS: SportItem[] = [
-  { id: "tennis", label: "Tennis", emoji: "🎾" },
-  { id: "basketball", label: "Basketball", emoji: "🏀" },
-  { id: "soccer", label: "Soccer", emoji: "⚽" },
-  { id: "badminton", label: "Badminton", emoji: "🏸" },
-  { id: "table_tennis", label: "Table Tennis", emoji: "🏓" },
-  { id: "volleyball", label: "Volleyball", emoji: "🏐" },
-  { id: "squash", label: "Squash", emoji: "🎯" },
-  { id: "golf", label: "Golf", emoji: "⛳" },
-];
+const RUNNING_SCENE_LABELS: Record<string, string> = {
+  easy: "Easy Runs",
+  "5k_10k": "5K / 10K",
+  half_full: "Half Marathon / Marathon",
+};
+
+type SportItem = (typeof SPORTS)[number];
 
 function paramString(value: string | string[] | undefined): string | undefined {
   if (typeof value === "string") return value;
@@ -159,20 +165,78 @@ export default function MatchFilterScreen() {
     return SPORTS[0];
   });
 
-  const skillOptions = useMemo(
-    () => SKILL_LEVELS[selectedSport.id] ?? SKILL_LEVELS.tennis,
-    [selectedSport.id]
+  const scaleValues = useRef(
+    SPORTS.reduce(
+      (acc, sport) => {
+        acc[sport.id] = new Animated.Value(
+          sport.id === selectedSport.id ? 1.12 : 1
+        );
+        return acc;
+      },
+      {} as Record<string, Animated.Value>
+    )
+  ).current;
+
+  const selectSport = useCallback(
+    (sport: SportItem) => {
+      const prevId = selectedSport.id;
+      if (prevId === sport.id) return;
+
+      Animated.spring(scaleValues[prevId], {
+        toValue: 1.0,
+        useNativeDriver: true,
+        tension: 120,
+        friction: 6,
+      }).start();
+
+      Animated.spring(scaleValues[sport.id], {
+        toValue: 1.12,
+        useNativeDriver: true,
+        tension: 120,
+        friction: 6,
+      }).start();
+
+      setSelectedSport(sport);
+    },
+    [selectedSport.id, scaleValues]
   );
+
+  const isGolf = selectedSport.id === "golf";
+  const isRunning = selectedSport.id === "running";
+
+  const [golfScene, setGolfScene] = useState("driving_range");
+  const [runningScene, setRunningScene] = useState("easy");
+  const [runningUnit, setRunningUnit] = useState<"mi" | "km">("mi");
+
+  const skillOptions = useMemo(() => {
+    if (isRunning) {
+      return runningUnit === "mi"
+        ? [...RUNNING_SKILL_LEVELS_MI]
+        : [...RUNNING_SKILL_LEVELS_KM];
+    }
+    return SKILL_LEVELS[selectedSport.id] ?? SKILL_LEVELS.tennis;
+  }, [isRunning, runningUnit, selectedSport.id]);
 
   const [skillLevel, setSkillLevel] = useState<string>(
     () => SKILL_LEVELS.tennis[0] ?? ""
   );
 
   useEffect(() => {
+    setGolfScene("driving_range");
+    setRunningScene("easy");
+    setRunningUnit("mi");
+  }, [selectedSport.id]);
+
+  useEffect(() => {
     setSkillLevel((prev) =>
       skillOptions.includes(prev) ? prev : (skillOptions[0] ?? "")
     );
   }, [skillOptions]);
+
+  const referenceUrl = SKILL_LEVEL_REFERENCE_URLS[selectedSport.id] ?? null;
+
+  const showSkillSection =
+    (!isGolf || Boolean(golfScene)) && (!isRunning || Boolean(runningScene));
 
   const [distance, setDistance] = useState(10);
   const [minAge, setMinAge] = useState(25);
@@ -186,8 +250,19 @@ export default function MatchFilterScreen() {
       Boolean(skillLevel?.trim()) &&
       availability.size >= 1 &&
       Boolean(gender?.trim()) &&
-      Boolean(purpose?.trim()),
-    [skillLevel, availability, gender, purpose]
+      Boolean(purpose?.trim()) &&
+      (!isGolf || Boolean(golfScene)) &&
+      (!isRunning || Boolean(runningScene)),
+    [
+      skillLevel,
+      availability,
+      gender,
+      purpose,
+      isGolf,
+      golfScene,
+      isRunning,
+      runningScene,
+    ]
   );
 
   useEffect(() => {
@@ -211,10 +286,17 @@ export default function MatchFilterScreen() {
   const onStartMatching = useCallback(() => {
     const sportLabel = `${selectedSport.label} ${selectedSport.emoji}`;
     const availabilityList = [...availability].sort();
+    const sceneLabel = isGolf
+      ? GOLF_SCENE_LABELS[golfScene]
+      : isRunning
+        ? RUNNING_SCENE_LABELS[runningScene]
+        : null;
+    const profileSkillLevel =
+      sceneLabel && skillLevel ? `${sceneLabel} · ${skillLevel}` : skillLevel;
 
     void mergeUserProfile({
       sport: selectedSport.id,
-      skillLevel,
+      skillLevel: profileSkillLevel,
       availability: availabilityList,
     });
 
@@ -223,6 +305,7 @@ export default function MatchFilterScreen() {
       params: {
         sport: selectedSport.id,
         sportLabel,
+        sportScene: sceneLabel ?? "",
         skillLevels: JSON.stringify(skillLevel ? [skillLevel] : []),
         availability: JSON.stringify(availabilityList),
         ageRange: JSON.stringify([`${minAge}-${maxAge}`]),
@@ -239,6 +322,10 @@ export default function MatchFilterScreen() {
     maxAge,
     gender,
     purpose,
+    isGolf,
+    golfScene,
+    isRunning,
+    runningScene,
   ]);
 
   return (
@@ -277,43 +364,150 @@ export default function MatchFilterScreen() {
             {SPORTS.map((s) => {
               const selected = s.id === selectedSport.id;
               return (
-                <Pressable
+                <Animated.View
                   key={s.id}
-                  onPress={() => setSelectedSport(s)}
-                  style={({ pressed }) => [
-                    styles.sportChip,
-                    selected ? styles.sportChipSelected : styles.sportChipUnselected,
-                    pressed && styles.pillPressed,
-                  ]}
+                  style={{ transform: [{ scale: scaleValues[s.id] }] }}
                 >
-                  <Text style={styles.sportChipEmoji}>{s.emoji}</Text>
-                  <Text
-                    style={[
-                      styles.sportChipLabel,
-                      selected ? styles.sportChipLabelSelected : styles.sportChipLabelUnselected,
+                  <Pressable
+                    onPress={() => selectSport(s)}
+                    style={({ pressed }) => [
+                      styles.sportChip,
+                      selected
+                        ? styles.sportChipSelected
+                        : styles.sportChipUnselected,
+                      selected && styles.sportChipSelectedContent,
+                      pressed && styles.pillPressed,
                     ]}
                   >
-                    {s.label}
-                  </Text>
-                </Pressable>
+                    <Text style={{ fontSize: selected ? 28 : 20 }}>{s.emoji}</Text>
+                    {!selected ? (
+                      <Text
+                        style={{
+                          color: "#15803d",
+                          fontSize: 13,
+                          fontWeight: "600",
+                        }}
+                      >
+                        {s.label}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                </Animated.View>
               );
             })}
           </ScrollView>
         </View>
 
-        <Text style={styles.sectionTitle}>Skill Level</Text>
-        <View style={styles.sectionCard}>
-          <Picker
-            selectedValue={skillLevel}
-            onValueChange={(value) => setSkillLevel(String(value))}
-            style={styles.wheelPicker}
-            itemStyle={styles.wheelPickerItem}
-          >
-            {skillOptions.map((opt) => (
-              <Picker.Item key={opt} label={opt} value={opt} />
-            ))}
-          </Picker>
-        </View>
+        {isGolf ? (
+          <>
+            <Text style={styles.sectionTitle}>Choose your scene</Text>
+            <View style={styles.scenePickerCard}>
+              <Picker
+                selectedValue={golfScene}
+                onValueChange={(v) => setGolfScene(String(v))}
+                style={styles.scenePickerWheel}
+                itemStyle={styles.scenePickerItem}
+              >
+                <Picker.Item
+                  label="Driving range only"
+                  value="driving_range"
+                />
+                <Picker.Item label="9-hole round" value="9_hole" />
+                <Picker.Item label="18-hole round" value="18_hole" />
+                <Picker.Item label="Either" value="either" />
+              </Picker>
+            </View>
+          </>
+        ) : null}
+
+        {isRunning ? (
+          <>
+            <Text style={styles.sectionTitle}>Choose your scene</Text>
+            <View style={styles.scenePickerCard}>
+              <Picker
+                selectedValue={runningScene}
+                onValueChange={(v) => setRunningScene(String(v))}
+                style={styles.scenePickerWheel}
+                itemStyle={styles.scenePickerItem}
+              >
+                <Picker.Item label="Easy Runs" value="easy" />
+                <Picker.Item label="5K / 10K" value="5k_10k" />
+                <Picker.Item
+                  label="Half Marathon / Marathon"
+                  value="half_full"
+                />
+              </Picker>
+            </View>
+          </>
+        ) : null}
+
+        {showSkillSection ? (
+          <>
+            <View style={styles.skillSectionHeader}>
+              <Text style={styles.sectionTitle}>
+                {isRunning ? "Pace" : "Skill Level"}
+              </Text>
+              {isRunning ? (
+                <View style={styles.unitToggleRow}>
+                  <Pressable
+                    onPress={() => setRunningUnit("mi")}
+                    style={[
+                      styles.unitToggleBtn,
+                      runningUnit === "mi" && styles.unitToggleBtnActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.unitToggleText,
+                        runningUnit === "mi" && styles.unitToggleTextActive,
+                      ]}
+                    >
+                      mi
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setRunningUnit("km")}
+                    style={[
+                      styles.unitToggleBtn,
+                      runningUnit === "km" && styles.unitToggleBtnActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.unitToggleText,
+                        runningUnit === "km" && styles.unitToggleTextActive,
+                      ]}
+                    >
+                      km
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.sectionCard}>
+              <Picker
+                selectedValue={skillLevel}
+                onValueChange={(value) => setSkillLevel(String(value))}
+                style={styles.wheelPicker}
+                itemStyle={styles.wheelPickerItem}
+              >
+                {skillOptions.map((opt) => (
+                  <Picker.Item key={opt} label={opt} value={opt} />
+                ))}
+              </Picker>
+              {referenceUrl ? (
+                <Pressable
+                  onPress={() => void Linking.openURL(referenceUrl)}
+                  hitSlop={8}
+                >
+                  <Text style={styles.referenceLink}>
+                    Not sure about your level? Check here →
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </>
+        ) : null}
 
         <Text style={styles.sectionTitle}>Distance: {Math.round(distance)} miles</Text>
         <View style={styles.sectionCard}>
@@ -577,22 +771,13 @@ const styles = StyleSheet.create({
     backgroundColor: ACCENT_DARK,
     borderColor: ACCENT_DARK,
   },
+  sportChipSelectedContent: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
   sportChipUnselected: {
     backgroundColor: WHITE,
     borderColor: BORDER_SOFT,
-  },
-  sportChipEmoji: {
-    fontSize: 18,
-  },
-  sportChipLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  sportChipLabelSelected: {
-    color: WHITE,
-  },
-  sportChipLabelUnselected: {
-    color: ACCENT_DARK,
   },
   wheelPicker: {
     width: "100%",
@@ -670,6 +855,70 @@ const styles = StyleSheet.create({
   },
   pillPressed: {
     opacity: 0.88,
+  },
+  skillSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  unitToggleRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  unitToggleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: BORDER_SOFT,
+    backgroundColor: WHITE,
+  },
+  unitToggleBtnActive: {
+    backgroundColor: ACCENT_DARK,
+    borderColor: ACCENT_DARK,
+  },
+  unitToggleText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: ACCENT_DARK,
+  },
+  unitToggleTextActive: {
+    color: WHITE,
+  },
+  scenePickerCard: {
+    backgroundColor: WHITE,
+    borderRadius: 20,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: BORDER_CARD,
+    ...Platform.select({
+      ios: {
+        shadowColor: TEXT,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 14,
+      },
+      android: { elevation: 2 },
+      default: {},
+    }),
+  },
+  scenePickerWheel: {
+    height: 180,
+    width: "100%",
+  },
+  scenePickerItem: {
+    color: "#052e16",
+    fontSize: 18,
+    height: 180,
+  },
+  referenceLink: {
+    fontSize: 13,
+    color: "#15803d",
+    textDecorationLine: "underline",
+    textAlign: "center",
+    marginTop: 8,
   },
   footer: {
     position: "absolute",

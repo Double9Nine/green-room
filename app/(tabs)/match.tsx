@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { getSkillLevelCount, SPORTS } from "@/constants/skillLevels";
+
 const H_PADDING = 20;
 const ROW_GAP = 18;
 
@@ -12,33 +14,24 @@ const CARD_HEIGHT = 178;
 const COLUMN_GAP = 32;
 const GRID_WIDTH = CARD_WIDTH * 2 + COLUMN_GAP;
 
-const SPORTS = [
-  { id: "tennis", label: "Tennis", emoji: "🎾", levels: 8 },
-  { id: "basketball", label: "Basketball", emoji: "🏀", levels: 5 },
-  { id: "soccer", label: "Soccer", emoji: "⚽", levels: 5 },
-  { id: "badminton", label: "Badminton", emoji: "🏸", levels: 4 },
-  { id: "table_tennis", label: "Table Tennis", emoji: "🏓", levels: 4 },
-  { id: "volleyball", label: "Volleyball", emoji: "🏐", levels: 5 },
-  { id: "squash", label: "Squash", emoji: "🎯", levels: 4 },
-  { id: "golf", label: "Golf", emoji: "⛳", levels: 5 },
-] as const;
+const MATCH_SPORT_CARDS = SPORTS.map((sport) => ({
+  ...sport,
+  levels: getSkillLevelCount(sport.id),
+}));
 
 const ROWS = [
-  [SPORTS[0], SPORTS[1]],
-  [SPORTS[2], SPORTS[3]],
-  [SPORTS[4], SPORTS[5]],
-  [SPORTS[6], SPORTS[7]],
+  [MATCH_SPORT_CARDS[0], MATCH_SPORT_CARDS[1]],
+  [MATCH_SPORT_CARDS[2], MATCH_SPORT_CARDS[3]],
+  [MATCH_SPORT_CARDS[4], MATCH_SPORT_CARDS[5]],
 ] as const;
 
 const SPORT_BORDER_COLORS: Record<(typeof SPORTS)[number]["id"], string> = {
   tennis: "#86efac",
-  basketball: "#fdba74",
-  soccer: "#6ee7b7",
   badminton: "#93c5fd",
-  table_tennis: "#f9a8d4",
-  volleyball: "#fde68a",
-  squash: "#c4b5fd",
-  golf: "#86efac",
+  pickleball: "#f9a8d4",
+  bouldering: "#fdba74",
+  golf: "#fde68a",
+  running: "#6ee7b7",
 };
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -59,7 +52,7 @@ function hexToRgba(hex: string, alpha: number): string {
 export default function MatchScreen() {
   const router = useRouter();
   const emojiAnims = useRef(
-    SPORTS.map(() => new Animated.Value(0))
+    MATCH_SPORT_CARDS.map(() => new Animated.Value(0))
   ).current;
 
   useEffect(() => {

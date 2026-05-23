@@ -3,29 +3,31 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Animated,
-  Dimensions,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Animated,
+    Dimensions,
+    Easing,
+    Image,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 import {
-  SafeAreaView,
-  useSafeAreaInsets,
+    SafeAreaView,
+    useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
 import { PROFILE_SPORTS } from "@/constants/skillLevels";
 import {
-  loadUserProfile,
-  type UserProfile,
+    loadUserProfile,
+    type UserProfile,
 } from "@/lib/profileStorage";
 
 const { width, height } = Dimensions.get("window");
 const CARD_WIDTH = width * 0.88;
 const CARD_MIN_HEIGHT = height * 0.58;
+const CARD_HEIGHT = CARD_MIN_HEIGHT;
 
 const GOLD = "#d4af37";
 const DARK_GREEN = "#052e16";
@@ -34,6 +36,8 @@ const CARD_GRADIENT = ["#064e3b", "#065f46", "#047857"] as const;
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 const TIME_NAMES = ["Mornings", "Afternoons", "Evenings"] as const;
+
+const TILT_X = "8deg";
 
 const SPARKLE_POSITIONS = [
   { left: "8%", top: "6%", size: 5, baseOpacity: 0.25 },
@@ -180,6 +184,81 @@ function StatRow({
       </Text>
       <Text style={styles.statValue}>{value}</Text>
     </Text>
+  );
+}
+
+type FlippableAllStarCardProps = {
+  profile: UserProfile;
+};
+
+function FlippableAllStarCard({ profile }: FlippableAllStarCardProps) {
+  const [isFlipped, setIsFlipped] = useState(false);
+  const flipAnim = useRef(new Animated.Value(0)).current;
+
+  const handleFlip = () => {
+    const toValue = isFlipped ? 0 : 1;
+    Animated.timing(flipAnim, {
+      toValue,
+      duration: 1100,
+      easing: Easing.out(Easing.back(1.2)),
+      useNativeDriver: true,
+    }).start();
+    setIsFlipped(!isFlipped);
+  };
+
+  const frontRotate = flipAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "180deg"],
+  });
+
+  const backRotate = flipAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["-180deg", "0deg"],
+  });
+
+  const flipTransform = (rotateY: Animated.AnimatedInterpolation<string>) => [
+    { perspective: 600 },
+    { rotateY },
+    { rotateX: TILT_X },
+  ];
+
+  return (
+    <View style={styles.flipStage}>
+      <Pressable onPress={handleFlip}>
+        <View
+          style={[
+            styles.flipCardContainer,
+            { width: CARD_WIDTH, height: CARD_HEIGHT },
+          ]}
+        >
+          <Animated.View
+            style={[
+              styles.flipFaceFront,
+              { transform: flipTransform(frontRotate) },
+            ]}
+          >
+            <AllStarCard profile={profile} />
+          </Animated.View>
+
+          <Animated.View
+            style={[
+              styles.flipFaceBack,
+              { transform: flipTransform(backRotate) },
+            ]}
+          >
+            <View style={[styles.backCorner, styles.backCornerTL]} />
+            <View style={[styles.backCorner, styles.backCornerTR]} />
+            <View style={[styles.backCorner, styles.backCornerBL]} />
+            <View style={[styles.backCorner, styles.backCornerBR]} />
+            <Text style={styles.backStar}>⭐</Text>
+            <Text style={styles.backTitle}>GREEN ROOM</Text>
+            <Text style={styles.backSubtitle}>ALL-STAR PLAYER</Text>
+          </Animated.View>
+        </View>
+      </Pressable>
+
+      <Text style={styles.flipHint}>Tap to flip</Text>
+    </View>
   );
 }
 
@@ -350,7 +429,7 @@ export default function MyPlayerCardScreen() {
             ]}
             showsVerticalScrollIndicator={false}
           >
-            {profile ? <AllStarCard profile={profile} /> : null}
+            {profile ? <FlippableAllStarCard profile={profile} /> : null}
           </ScrollView>
 
           {toast ? (
@@ -404,6 +483,94 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
+  },
+  flipStage: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  flipCardContainer: {
+    position: "relative",
+  },
+  flipFaceFront: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+    backfaceVisibility: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 8, height: 16 },
+    shadowOpacity: 0.7,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  flipFaceBack: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+    backfaceVisibility: "hidden",
+    backgroundColor: DARK_GREEN,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: GOLD,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: -8, height: 16 },
+    shadowOpacity: 0.7,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  backCorner: {
+    position: "absolute",
+    width: 24,
+    height: 24,
+    borderColor: GOLD,
+  },
+  backCornerTL: {
+    top: 16,
+    left: 16,
+    borderTopWidth: 2.5,
+    borderLeftWidth: 2.5,
+  },
+  backCornerTR: {
+    top: 16,
+    right: 16,
+    borderTopWidth: 2.5,
+    borderRightWidth: 2.5,
+  },
+  backCornerBL: {
+    bottom: 16,
+    left: 16,
+    borderBottomWidth: 2.5,
+    borderLeftWidth: 2.5,
+  },
+  backCornerBR: {
+    bottom: 16,
+    right: 16,
+    borderBottomWidth: 2.5,
+    borderRightWidth: 2.5,
+  },
+  backStar: {
+    fontSize: 60,
+  },
+  backTitle: {
+    color: GOLD,
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: 3,
+    marginTop: 16,
+  },
+  backSubtitle: {
+    color: "#86efac",
+    fontSize: 12,
+    letterSpacing: 2,
+    marginTop: 8,
+  },
+  flipHint: {
+    color: GOLD,
+    fontSize: 13,
+    opacity: 0.7,
+    marginTop: 40,
+    letterSpacing: 1,
   },
   toast: {
     position: "absolute",
