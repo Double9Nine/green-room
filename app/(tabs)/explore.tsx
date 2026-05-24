@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -17,9 +17,31 @@ import {
   View,
 } from "react-native";
 import {
-    SafeAreaView,
-    useSafeAreaInsets,
+  SafeAreaView,
+  useSafeAreaInsets,
 } from "react-native-safe-area-context";
+import {
+  approveJoinRequest,
+  buildConfirmedMembersList,
+  declineJoinRequest,
+  ensureDemoEventSeed,
+  formatRequestAgo,
+  getConfirmedForEvent,
+  getMyStatusFromList,
+  getPendingForEvent,
+  leaveEvent,
+  loadEventMembers,
+  seedDemoPendingForEvent,
+  loadEventRequests,
+  loadPendingRequests,
+  resolveEventSpotsAndMembers,
+  type EventRequest,
+  type EventRequestsByEvent,
+  type MemberStatus,
+} from "../../lib/eventRequestStorage";
+import { getCurrentUser } from "../../lib/getCurrentUser";
+import { upsertGroupChatConversation } from "../../lib/groupChatConversationsStorage";
+import { loadGroupChatMessages } from "../../lib/groupChatStorage";
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -94,6 +116,8 @@ type SubTab = "discover" | "my" | "joined";
 export type PlazaEvent = {
   id: number;
   user: string;
+  organizer: string;
+  organizerInitial: string;
   sport: string;
   title: string;
   location: string;
@@ -120,8 +144,23 @@ type PlacePrediction = {
   };
 };
 
+function withOrganizer(
+  event: Omit<PlazaEvent, "organizer" | "organizerInitial">
+): PlazaEvent {
+  return {
+    ...event,
+    organizer: event.user,
+    organizerInitial: event.user
+      .split(/\s+/)
+      .map((p) => p[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase(),
+  };
+}
+
 const DUMMY_EVENTS: PlazaEvent[] = [
-  {
+  withOrganizer({
     id: 1,
     user: "Sarah M.",
     sport: "Tennis",
@@ -130,13 +169,13 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     distance: "0.8 mi",
     time: "Today, 9:00 AM",
     postedAgo: "1h ago",
-    spots: 1,
+    spots: 2,
     maxSpots: 2,
     likes: 18,
     comments: 6,
     details: "Looking for a 3.5+ player for a friendly singles match.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 2,
     user: "Mike L.",
     sport: "Pickleball",
@@ -150,8 +189,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 24,
     comments: 9,
     details: "All levels welcome! Paddles provided.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 3,
     user: "Emma R.",
     sport: "Padel",
@@ -165,8 +204,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 12,
     comments: 4,
     details: "Looking for two more players for a fun doubles game.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 4,
     user: "James K.",
     sport: "Running",
@@ -180,8 +219,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 31,
     comments: 11,
     details: "Easy pace group run. All levels welcome!",
-  },
-  {
+  }),
+  withOrganizer({
     id: 5,
     user: "Carlos R.",
     sport: "Soccer",
@@ -195,8 +234,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 42,
     comments: 15,
     details: "Casual pickup game. Bring your own cleats.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 6,
     user: "Marcus T.",
     sport: "Basketball",
@@ -210,8 +249,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 28,
     comments: 8,
     details: "Competitive but friendly 3v3. All skill levels.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 7,
     user: "Lisa C.",
     sport: "Volleyball",
@@ -225,8 +264,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 35,
     comments: 13,
     details: "Fun beach volleyball session. Beginners welcome!",
-  },
-  {
+  }),
+  withOrganizer({
     id: 8,
     user: "Amy W.",
     sport: "Badminton",
@@ -240,8 +279,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 12,
     comments: 4,
     details: "Relaxed game, all levels welcome. Shuttlecocks provided.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 9,
     user: "David W.",
     sport: "Climbing",
@@ -255,8 +294,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 22,
     comments: 7,
     details: "Beginner to intermediate routes. Shoes available to rent.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 10,
     user: "Tom H.",
     sport: "Cycling",
@@ -270,8 +309,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 19,
     comments: 5,
     details: "15-mile scenic ride along the Hudson. Moderate pace.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 11,
     user: "Rachel K.",
     sport: "Kickball",
@@ -285,8 +324,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 38,
     comments: 12,
     details: "Super fun and casual kickball game. No experience needed!",
-  },
-  {
+  }),
+  withOrganizer({
     id: 12,
     user: "Jake M.",
     sport: "Softball",
@@ -300,8 +339,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 27,
     comments: 9,
     details: "Friendly co-ed softball. Gloves provided for those who need.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 13,
     user: "Nina P.",
     sport: "Flag Football",
@@ -315,8 +354,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 33,
     comments: 11,
     details: "7v7 flag football. All positions needed!",
-  },
-  {
+  }),
+  withOrganizer({
     id: 14,
     user: "Steve B.",
     sport: "Bowling",
@@ -330,8 +369,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 41,
     comments: 16,
     details: "Fun bowling night. Shoes included. Drinks optional!",
-  },
-  {
+  }),
+  withOrganizer({
     id: 15,
     user: "Jenny L.",
     sport: "Table Tennis",
@@ -345,8 +384,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 16,
     comments: 6,
     details: "Round robin format. All skill levels. $5 entry.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 16,
     user: "Alex D.",
     sport: "Social Event",
@@ -360,8 +399,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 55,
     comments: 22,
     details: "Meet fellow sports lovers over drinks. No equipment needed!",
-  },
-  {
+  }),
+  withOrganizer({
     id: 17,
     user: "Mia C.",
     sport: "Swimming",
@@ -375,8 +414,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 14,
     comments: 4,
     details: "Casual open water swim. Must be comfortable in open water.",
-  },
-  {
+  }),
+  withOrganizer({
     id: 18,
     user: "Ben T.",
     sport: "Other",
@@ -390,7 +429,22 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 21,
     comments: 7,
     details: "Ultimate frisbee casual game. No experience needed!",
-  },
+  }),
+  withOrganizer({
+    id: 99,
+    user: "Tommy K.",
+    sport: "Basketball",
+    title: "Full Court 5v5 Basketball",
+    location: "West 4th Street Courts, NY",
+    distance: "1.1 mi",
+    time: "Today, 6:00 PM",
+    postedAgo: "Just now",
+    spots: 10,
+    maxSpots: 10,
+    likes: 52,
+    comments: 18,
+    details: "Competitive 5v5 full court game. All spots taken!",
+  }),
 ];
 
 function getInitials(name: string) {
@@ -432,27 +486,47 @@ type EventCardProps = {
   mode: SubTab;
   joined: boolean;
   liked: boolean;
+  requestStatus?: MemberStatus;
   onToggleLike: () => void;
   onJoin: () => void;
   onUnjoin: () => void;
+  onEventDetails?: () => void;
+  onCardPress?: () => void;
+  onManageRequests?: () => void;
+  pendingRequestCount?: number;
+  showGroupChat?: boolean;
+  onOpenGroupChat?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
 };
+
+function stopCardPress(e: unknown) {
+  const ev = e as { stopPropagation?: () => void };
+  ev.stopPropagation?.();
+}
 
 function EventCard({
   event,
   mode,
   joined,
   liked,
+  requestStatus = "none",
   onToggleLike,
   onJoin,
   onUnjoin,
+  onEventDetails,
+  onCardPress,
+  onManageRequests,
+  pendingRequestCount = 0,
+  showGroupChat = false,
+  onOpenGroupChat,
   onEdit,
   onDelete,
 }: EventCardProps) {
   const placeholder =
     SPORT_PLACEHOLDER[event.sport] ?? SPORT_PLACEHOLDER.Tennis;
-  const full = event.spots >= event.maxSpots;
+  const cardIsPressable =
+    !!onCardPress && (mode === "joined" || mode === "my");
 
   const handleShare = async () => {
     try {
@@ -464,8 +538,8 @@ function EventCard({
     }
   };
 
-  return (
-    <View style={styles.eventCard}>
+  const cardBody = (
+    <>
       <View style={styles.eventTopRow}>
         <View style={styles.eventAvatar}>
           <Text style={styles.eventAvatarText}>{getInitials(event.user)}</Text>
@@ -481,15 +555,47 @@ function EventCard({
 
       <Text style={styles.eventTitle}>{event.title}</Text>
 
+      {mode === "discover" && requestStatus !== "none" ? (
+        <View
+          style={[
+            styles.requestStatusBadge,
+            requestStatus === "pending" && styles.requestStatusPending,
+            requestStatus === "confirmed" && styles.requestStatusConfirmed,
+            requestStatus === "rejected" && styles.requestStatusRejected,
+          ]}
+        >
+          <Text
+            style={[
+              styles.requestStatusBadgeText,
+              requestStatus === "pending" && styles.requestStatusTextPending,
+              requestStatus === "confirmed" && styles.requestStatusTextConfirmed,
+              requestStatus === "rejected" && styles.requestStatusTextRejected,
+            ]}
+          >
+            {requestStatus === "pending"
+              ? "⏳ Pending"
+              : requestStatus === "confirmed"
+                ? "✓ Joined"
+                : "❌ Declined"}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.eventImageWrap}>
         <View
           style={[styles.eventImagePlaceholder, { backgroundColor: placeholder.bg }]}
         >
           <Text style={styles.eventImageEmoji}>{placeholder.emoji}</Text>
         </View>
-        <View style={styles.spotsBadge}>
+        <View
+          style={[
+            styles.spotsBadge,
+            event.spots >= event.maxSpots && styles.spotsBadgeFull,
+          ]}
+        >
           <Text style={styles.spotsBadgeText}>
             👥 {event.spots}/{event.maxSpots}
+            {event.spots >= event.maxSpots ? " · FULL" : ""}
           </Text>
         </View>
       </View>
@@ -504,7 +610,14 @@ function EventCard({
       </View>
 
       <View style={styles.eventActionsRow}>
-        <Pressable onPress={onToggleLike} style={styles.actionChip} hitSlop={8}>
+        <Pressable
+          onPress={(e) => {
+            if (cardIsPressable) stopCardPress(e);
+            onToggleLike();
+          }}
+          style={styles.actionChip}
+          hitSlop={8}
+        >
           <Text style={styles.actionChipText}>
             {liked ? "❤️" : "🤍"} {event.likes + (liked ? 1 : 0)}
           </Text>
@@ -512,29 +625,19 @@ function EventCard({
         <View style={styles.actionChip}>
           <Text style={styles.actionChipText}>💬 {event.comments}</Text>
         </View>
-        <Pressable onPress={() => void handleShare()} hitSlop={8}>
+        <Pressable
+          onPress={(e) => {
+            if (cardIsPressable) stopCardPress(e);
+            void handleShare();
+          }}
+          hitSlop={8}
+        >
           <Ionicons name="share-outline" size={22} color={MUTED} />
         </Pressable>
 
         {mode === "discover" ? (
-          joined ? (
-            <View style={[styles.joinBtn, styles.joinBtnJoined]}>
-              <Text style={styles.joinBtnJoinedText}>Joined ✓</Text>
-            </View>
-          ) : full ? (
-            <View style={[styles.joinBtn, styles.joinBtnJoined]}>
-              <Text style={styles.joinBtnJoinedText}>Full</Text>
-            </View>
-          ) : (
-            <Pressable style={styles.joinBtn} onPress={onJoin}>
-              <Text style={styles.joinBtnText}>Join Event</Text>
-            </Pressable>
-          )
-        ) : null}
-
-        {mode === "joined" ? (
-          <Pressable style={styles.cancelBtn} onPress={onUnjoin}>
-            <Text style={styles.cancelBtnText}>Cancel</Text>
+          <Pressable style={styles.joinBtn} onPress={onEventDetails}>
+            <Text style={styles.joinBtnText}>Event Details</Text>
           </Pressable>
         ) : null}
       </View>
@@ -544,21 +647,72 @@ function EventCard({
           <Text style={styles.joinedCountText}>
             {event.spots} people joined
           </Text>
+          {pendingRequestCount > 0 ? (
+            <Pressable
+              style={styles.manageRequestsBtn}
+              onPress={(e) => {
+                if (cardIsPressable) stopCardPress(e);
+                onManageRequests?.();
+              }}
+            >
+              <Text style={styles.manageRequestsBtnText}>Manage Requests</Text>
+              <View style={styles.pendingCountBadge}>
+                <Text style={styles.pendingCountBadgeText}>
+                  {pendingRequestCount} pending
+                </Text>
+              </View>
+            </Pressable>
+          ) : null}
+          {showGroupChat ? (
+            <Pressable
+              style={styles.myEventGroupChatBtn}
+              onPress={(e) => {
+                if (cardIsPressable) stopCardPress(e);
+                onOpenGroupChat?.();
+              }}
+            >
+              <Ionicons name="chatbubbles-outline" size={18} color={WHITE} />
+              <Text style={styles.myEventGroupChatBtnText}>Group Chat</Text>
+            </Pressable>
+          ) : null}
           <View style={styles.myEventActions}>
-            <Pressable style={styles.outlineBtn} onPress={onEdit}>
+            <Pressable
+              style={styles.outlineBtn}
+              onPress={(e) => {
+                if (cardIsPressable) stopCardPress(e);
+                onEdit?.();
+              }}
+            >
               <Text style={styles.outlineBtnText}>Edit</Text>
             </Pressable>
-            <Pressable style={styles.deleteBtn} onPress={onDelete}>
+            <Pressable
+              style={styles.deleteBtn}
+              onPress={(e) => {
+                if (cardIsPressable) stopCardPress(e);
+                onDelete?.();
+              }}
+            >
               <Text style={styles.deleteBtnText}>Delete</Text>
             </Pressable>
           </View>
         </>
       ) : null}
-    </View>
+    </>
   );
+
+  if (cardIsPressable) {
+    return (
+      <Pressable onPress={onCardPress} style={styles.eventCard}>
+        {cardBody}
+      </Pressable>
+    );
+  }
+
+  return <View style={styles.eventCard}>{cardBody}</View>;
 }
 
 export default function ExploreScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const [subTab, setSubTab] = useState<SubTab>("discover");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -567,7 +721,12 @@ export default function ExploreScreen() {
   const [myEvents, setMyEvents] = useState<PlazaEvent[]>([]);
   const [joinedIds, setJoinedIds] = useState<number[]>([]);
   const [likedIds, setLikedIds] = useState<Set<number>>(new Set());
-  const [spotOverrides, setSpotOverrides] = useState<Record<number, number>>({});
+  const [eventRequestsList, setEventRequestsList] = useState<EventRequest[]>([]);
+  const [pendingMap, setPendingMap] = useState<EventRequestsByEvent>({});
+  const [eventMembersMap, setEventMembersMap] = useState<EventRequestsByEvent>({});
+  const [requestsModalEvent, setRequestsModalEvent] = useState<PlazaEvent | null>(
+    null
+  );
   const [createVisible, setCreateVisible] = useState(false);
   const [editingEvent, setEditingEvent] = useState<PlazaEvent | null>(null);
   const modalScrollRef = useRef<ScrollView>(null);
@@ -588,21 +747,32 @@ export default function ExploreScreen() {
   const [details, setDetails] = useState("");
   const loadStorage = useCallback(async () => {
     try {
-      const [myRaw, joinedRaw] = await Promise.all([
+      await ensureDemoEventSeed();
+      const [myRaw, joinedRaw, requests, pending, members] = await Promise.all([
         AsyncStorage.getItem(MY_EVENTS_KEY),
         AsyncStorage.getItem(JOINED_EVENTS_KEY),
+        loadEventRequests(),
+        loadPendingRequests(),
+        loadEventMembers(),
       ]);
       if (myRaw) {
         const parsed = JSON.parse(myRaw) as PlazaEvent[];
         setMyEvents(Array.isArray(parsed) ? parsed : []);
       }
+      // Legacy instant-join IDs are no longer used; Joined tab uses confirmed requests only.
       if (joinedRaw) {
-        const parsed = JSON.parse(joinedRaw) as number[];
-        setJoinedIds(Array.isArray(parsed) ? parsed : []);
+        await AsyncStorage.setItem(JOINED_EVENTS_KEY, JSON.stringify([]));
       }
+      setJoinedIds([]);
+      setEventRequestsList(requests);
+      setPendingMap(pending);
+      setEventMembersMap(members);
     } catch {
       setMyEvents([]);
       setJoinedIds([]);
+      setEventRequestsList([]);
+      setPendingMap({});
+      setEventMembersMap({});
     }
   }, []);
 
@@ -612,14 +782,31 @@ export default function ExploreScreen() {
     }, [loadStorage])
   );
 
+  const getRequestStatus = useCallback(
+    (eventId: number): MemberStatus =>
+      getMyStatusFromList(eventRequestsList, eventId),
+    [eventRequestsList]
+  );
+
   const allDiscoverEvents = useMemo(() => {
     const dummyIds = new Set(DUMMY_EVENTS.map((e) => e.id));
     const created = myEvents.filter((e) => !dummyIds.has(e.id));
-    return [...created, ...DUMMY_EVENTS].map((e) => ({
-      ...e,
-      spots: spotOverrides[e.id] ?? e.spots,
-    }));
-  }, [myEvents, spotOverrides]);
+    const merged = [...created, ...DUMMY_EVENTS].map((e) => {
+      const confirmed = getConfirmedForEvent(eventMembersMap, e.id);
+      const { spotsTaken } = resolveEventSpotsAndMembers(
+        e,
+        confirmed,
+        !e.createdByMe
+      );
+      return {
+        ...e,
+        spots: spotsTaken,
+      };
+    });
+    const fullDemo = merged.find((e) => e.id === 99);
+    if (!fullDemo) return merged;
+    return [fullDemo, ...merged.filter((e) => e.id !== 99)];
+  }, [myEvents, eventMembersMap]);
 
   const filteredDiscover = useMemo(() => {
     let list = [...allDiscoverEvents];
@@ -641,11 +828,11 @@ export default function ExploreScreen() {
 
   const joinedEvents = useMemo(
     () =>
-      allDiscoverEvents.filter((e) => joinedIds.includes(e.id)).map((e) => ({
-        ...e,
-        spots: spotOverrides[e.id] ?? e.spots,
-      })),
-    [allDiscoverEvents, joinedIds, spotOverrides]
+      allDiscoverEvents.filter(
+        (e) =>
+          !e.createdByMe && getRequestStatus(e.id) === "confirmed"
+      ),
+    [allDiscoverEvents, getRequestStatus]
   );
 
   const fetchLocationSuggestions = async (input: string) => {
@@ -760,9 +947,13 @@ export default function ExploreScreen() {
       return;
     }
 
+    const user = await getCurrentUser();
+
     const newEvent: PlazaEvent = {
       id: Date.now(),
-      user: "You",
+      user: user.name,
+      organizer: user.name,
+      organizerInitial: user.initial,
       sport,
       title: formName.trim(),
       location: location.trim(),
@@ -781,19 +972,10 @@ export default function ExploreScreen() {
     };
 
     await persistMyEvents([newEvent, ...myEvents]);
+    await seedDemoPendingForEvent(newEvent.id);
+    await refreshRequestData();
     closeModal();
     setSubTab("my");
-  };
-
-  const handleJoin = async (event: PlazaEvent) => {
-    if (joinedIds.includes(event.id)) return;
-    if (event.spots >= event.maxSpots) return;
-    const nextJoined = [...joinedIds, event.id];
-    await persistJoined(nextJoined);
-    setSpotOverrides((prev) => ({
-      ...prev,
-      [event.id]: (prev[event.id] ?? event.spots) + 1,
-    }));
   };
 
   const scrollModalToEnd = () => {
@@ -855,14 +1037,117 @@ export default function ExploreScreen() {
     </Modal>
   );
 
+  const openEventDetails = (event: PlazaEvent, joined = false) => {
+    router.push({
+      pathname: "/event-details",
+      params: {
+        eventId: String(event.id),
+        eventData: JSON.stringify(event),
+        ...(joined ? { joined: "true" } : {}),
+      },
+    });
+  };
+
+  const openGroupChat = (
+    event: PlazaEvent,
+    membersMap: EventRequestsByEvent = eventMembersMap
+  ) => {
+    const confirmed = buildConfirmedMembersList(event, membersMap, event.id);
+    if (confirmed.length < 2) return;
+    const placeholder =
+      SPORT_PLACEHOLDER[event.sport] ?? SPORT_PLACEHOLDER.Tennis;
+    void (async () => {
+      const messages = await loadGroupChatMessages(event.id);
+      const last = messages[messages.length - 1];
+      await upsertGroupChatConversation({
+        eventId: String(event.id),
+        eventTitle: event.title,
+        sportEmoji: placeholder.emoji,
+        organizer: event.organizer,
+        lastMessage: last?.text ?? "No messages yet",
+        lastMessageTime: Date.now(),
+      });
+      router.push({
+        pathname: "/event-group-chat",
+        params: {
+          eventId: String(event.id),
+          eventTitle: event.title,
+          sportEmoji: placeholder.emoji,
+          organizer: event.organizer,
+          memberCount: String(confirmed.length),
+          memberInitials: JSON.stringify(
+            confirmed.slice(0, 3).map((m) => m.name[0]?.toUpperCase() ?? "?")
+          ),
+        },
+      });
+    })();
+  };
+
+  const refreshRequestData = async () => {
+    const [requests, pending, members] = await Promise.all([
+      loadEventRequests(),
+      loadPendingRequests(),
+      loadEventMembers(),
+    ]);
+    setEventRequestsList(requests);
+    setPendingMap(pending);
+    setEventMembersMap(members);
+  };
+
+  const handleApproveRequest = async (eventId: number, userId: string) => {
+    await approveJoinRequest(eventId, userId);
+    await refreshRequestData();
+
+    const source =
+      allDiscoverEvents.find((e) => e.id === eventId) ??
+      requestsModalEvent ??
+      myEvents.find((e) => e.id === eventId);
+    if (!source) return;
+
+    const members = await loadEventMembers();
+    setEventMembersMap(members);
+    const confirmed = buildConfirmedMembersList(source, members, eventId);
+    if (confirmed.length >= 2) {
+      const merged = allDiscoverEvents.find((e) => e.id === eventId) ?? source;
+      Alert.alert(
+        "Group chat unlocked",
+        "You have at least 2 members. Open group chat to test messaging.",
+        [
+          { text: "Not now", style: "cancel" },
+          {
+            text: "Open Group Chat",
+            onPress: () => {
+              setRequestsModalEvent(null);
+              openGroupChat(merged, members);
+            },
+          },
+        ]
+      );
+    }
+  };
+
+  const handleDeclineRequest = async (eventId: number, userId: string) => {
+    await declineJoinRequest(eventId, userId);
+    await refreshRequestData();
+  };
+
+  const modalPendingRequests = requestsModalEvent
+    ? getPendingForEvent(pendingMap, requestsModalEvent.id)
+    : [];
+
+  const modalConfirmedCount = requestsModalEvent
+    ? buildConfirmedMembersList(
+        requestsModalEvent,
+        eventMembersMap,
+        requestsModalEvent.id
+      ).length
+    : 0;
+
   const handleUnjoin = async (eventId: number) => {
+    await leaveEvent(eventId);
     const nextJoined = joinedIds.filter((id) => id !== eventId);
     await persistJoined(nextJoined);
-    setSpotOverrides((prev) => {
-      const event = allDiscoverEvents.find((e) => e.id === eventId);
-      const current = prev[eventId] ?? event?.spots ?? 0;
-      return { ...prev, [eventId]: Math.max(0, current - 1) };
-    });
+    await refreshRequestData();
   };
 
   const handleDelete = (event: PlazaEvent) => {
@@ -939,11 +1224,13 @@ export default function ExploreScreen() {
             key={event.id}
             event={event}
             mode="discover"
-            joined={joinedIds.includes(event.id)}
+            joined={getRequestStatus(event.id) === "confirmed"}
             liked={likedIds.has(event.id)}
+            requestStatus={getRequestStatus(event.id)}
             onToggleLike={() => toggleLike(event.id)}
-            onJoin={() => void handleJoin(event)}
+            onJoin={() => {}}
             onUnjoin={() => void handleUnjoin(event.id)}
+            onEventDetails={() => openEventDetails(event)}
           />
         ))}
       </ScrollView>
@@ -973,16 +1260,26 @@ export default function ExploreScreen() {
         {myEvents.map((event) => {
           const merged =
             allDiscoverEvents.find((e) => e.id === event.id) ?? event;
+          const confirmedCount = buildConfirmedMembersList(
+            merged,
+            eventMembersMap,
+            merged.id
+          ).length;
           return (
             <EventCard
               key={event.id}
-              event={{ ...merged, spots: spotOverrides[merged.id] ?? merged.spots }}
+              event={merged}
               mode="my"
               joined={joinedIds.includes(event.id)}
               liked={likedIds.has(event.id)}
               onToggleLike={() => toggleLike(event.id)}
               onJoin={() => {}}
               onUnjoin={() => {}}
+              onCardPress={() => openEventDetails(merged)}
+              pendingRequestCount={getPendingForEvent(pendingMap, merged.id).length}
+              showGroupChat={confirmedCount >= 2}
+              onOpenGroupChat={() => openGroupChat(merged)}
+              onManageRequests={() => setRequestsModalEvent(merged)}
               onEdit={() => openEditModal(merged)}
               onDelete={() => handleDelete(merged)}
             />
@@ -1021,7 +1318,8 @@ export default function ExploreScreen() {
             liked={likedIds.has(event.id)}
             onToggleLike={() => toggleLike(event.id)}
             onJoin={() => {}}
-            onUnjoin={() => void handleUnjoin(event.id)}
+            onCardPress={() => openEventDetails(event, true)}
+            onUnjoin={() => {}}
           />
         ))}
       </ScrollView>
@@ -1114,6 +1412,102 @@ export default function ExploreScreen() {
             </ScrollView>
           </View>
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={requestsModalEvent !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setRequestsModalEvent(null)}
+      >
+        <View style={styles.requestsModalOverlay}>
+          <View
+            style={[
+              styles.requestsModalSheet,
+              { paddingBottom: Math.max(insets.bottom, 16) },
+            ]}
+          >
+            <View style={styles.requestsModalHeader}>
+              <Text style={styles.requestsModalTitle}>Join Requests</Text>
+              <Pressable
+                onPress={() => setRequestsModalEvent(null)}
+                hitSlop={12}
+              >
+                <Ionicons name="close" size={28} color={TEXT} />
+              </Pressable>
+            </View>
+            {modalPendingRequests.length > 0 ? (
+              <Text style={styles.requestsModalHint}>
+                Approve at least 1 person to unlock group chat (you + 1 member).
+              </Text>
+            ) : null}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.requestsModalScroll}
+            >
+              {modalPendingRequests.length === 0 ? (
+                <Text style={styles.requestsEmptyText}>No pending requests</Text>
+              ) : (
+                modalPendingRequests.map((req) => (
+                  <View key={`${req.userId}-${req.requestedAt}`} style={styles.requestRow}>
+                    <View style={styles.requestAvatar}>
+                      <Text style={styles.requestAvatarText}>
+                        {req.userInitial}
+                      </Text>
+                    </View>
+                    <View style={styles.requestMeta}>
+                      <Text style={styles.requestName}>{req.userName}</Text>
+                      <Text style={styles.requestAgo}>
+                        {formatRequestAgo(req.requestedAt)}
+                      </Text>
+                    </View>
+                    <View style={styles.requestActions}>
+                      <Pressable
+                        style={styles.approveBtn}
+                        onPress={() => {
+                          if (requestsModalEvent) {
+                            void handleApproveRequest(
+                              requestsModalEvent.id,
+                              req.userId
+                            );
+                          }
+                        }}
+                      >
+                        <Text style={styles.approveBtnText}>Approve ✓</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.declineBtn}
+                        onPress={() => {
+                          if (requestsModalEvent) {
+                            void handleDeclineRequest(
+                              requestsModalEvent.id,
+                              req.userId
+                            );
+                          }
+                        }}
+                      >
+                        <Text style={styles.declineBtnText}>Decline ✗</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+            {modalConfirmedCount >= 2 && requestsModalEvent ? (
+              <Pressable
+                style={styles.requestsGroupChatBtn}
+                onPress={() => {
+                  const event = requestsModalEvent;
+                  setRequestsModalEvent(null);
+                  openGroupChat(event);
+                }}
+              >
+                <Ionicons name="chatbubbles-outline" size={20} color={WHITE} />
+                <Text style={styles.requestsGroupChatBtnText}>Open Group Chat</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
       </Modal>
 
       <Modal
@@ -1580,7 +1974,201 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "900",
     color: TEXT,
+    marginBottom: 6,
+  },
+  requestStatusBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
     marginBottom: 10,
+  },
+  requestStatusPending: {
+    backgroundColor: "#fef9c3",
+  },
+  requestStatusConfirmed: {
+    backgroundColor: "#dcfce7",
+  },
+  requestStatusRejected: {
+    backgroundColor: "#fef2f2",
+  },
+  requestStatusBadgeText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  requestStatusTextPending: {
+    color: "#ca8a04",
+  },
+  requestStatusTextConfirmed: {
+    color: ACCENT_DARK,
+  },
+  requestStatusTextRejected: {
+    color: "#dc2626",
+  },
+  manageRequestsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#dcfce7",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: ACCENT_DARK,
+  },
+  manageRequestsBtnText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: ACCENT_DARK,
+  },
+  myEventGroupChatBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: ACCENT_DARK,
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  myEventGroupChatBtnText: {
+    color: WHITE,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  requestsModalHint: {
+    fontSize: 13,
+    color: MUTED,
+    fontWeight: "600",
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  requestsGroupChatBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: ACCENT_DARK,
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginTop: 12,
+  },
+  requestsGroupChatBtnText: {
+    color: WHITE,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  pendingCountBadge: {
+    backgroundColor: ACCENT_DARK,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  pendingCountBadgeText: {
+    color: WHITE,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  requestsModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
+    justifyContent: "flex-end",
+  },
+  requestsModalSheet: {
+    backgroundColor: WHITE,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: "80%",
+  },
+  requestsModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  requestsModalTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: TEXT,
+  },
+  requestsModalScroll: {
+    padding: 16,
+    paddingBottom: 24,
+    gap: 12,
+  },
+  requestsEmptyText: {
+    fontSize: 15,
+    color: MUTED,
+    textAlign: "center",
+    paddingVertical: 24,
+  },
+  requestRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: BG,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    gap: 10,
+  },
+  requestAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#dbeafe",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  requestAvatarText: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1d4ed8",
+  },
+  requestMeta: {
+    flex: 1,
+  },
+  requestName: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: TEXT,
+  },
+  requestAgo: {
+    fontSize: 12,
+    color: MUTED,
+    marginTop: 2,
+  },
+  requestActions: {
+    gap: 6,
+  },
+  approveBtn: {
+    backgroundColor: ACCENT_DARK,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  approveBtnText: {
+    color: WHITE,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  declineBtn: {
+    backgroundColor: "#fef2f2",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+  },
+  declineBtnText: {
+    color: "#dc2626",
+    fontSize: 11,
+    fontWeight: "800",
   },
   eventImageWrap: {
     position: "relative",
@@ -1608,6 +2196,9 @@ const styles = StyleSheet.create({
     color: WHITE,
     fontSize: 12,
     fontWeight: "700",
+  },
+  spotsBadgeFull: {
+    backgroundColor: "#dc2626",
   },
   eventInfoRow: {
     flexDirection: "row",

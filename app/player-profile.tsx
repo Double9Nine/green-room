@@ -20,6 +20,10 @@ const GOLD = "#d4af37";
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 const TIMES = ["Mor", "Aft", "Eve"];
 
+const EVENT_CONTEXT_DEFAULT_AGE = "28";
+const EVENT_CONTEXT_DEFAULT_PURPOSE = "Level Up My Game 🏆";
+const EVENT_CONTEXT_DEFAULT_TAGS = ["Low-key competitive", "Won't flake"];
+
 function mockAvailabilitySlots(playerId: string): Set<string> {
   const id = parseInt(playerId, 10) || 1;
   const slots = new Set<string>();
@@ -33,6 +37,17 @@ function mockAvailabilitySlots(playerId: string): Set<string> {
   return slots;
 }
 
+function parseTagsParam(raw: string | undefined): string[] | null {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((t): t is string => typeof t === "string");
+  } catch {
+    return null;
+  }
+}
+
 export default function PlayerProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -43,21 +58,56 @@ export default function PlayerProfileScreen() {
     playerLocation?: string;
     playerSkill?: string;
     playerPurpose?: string;
+    playerTags?: string;
     sportEmoji?: string;
+    hideLocation?: string;
+    hideAvailability?: string;
+    isOrganizer?: string;
   }>();
 
   const playerName = params.playerName ?? "Player";
-  const playerAge = params.playerAge ?? "";
-  const playerLocation = params.playerLocation ?? "";
+  const hideLocation = params.hideLocation === "true";
+  const hideAvailability = params.hideAvailability === "true";
+  const isOrganizer = params.isOrganizer === "true";
+  const playerLocation = hideLocation ? "" : (params.playerLocation ?? "");
   const playerSkill = params.playerSkill ?? "";
-  const playerPurpose = params.playerPurpose ?? "";
   const sportEmoji = params.sportEmoji ?? "🎾";
   const playerId = params.playerId ?? "1";
+
+  const displayAge =
+    params.playerAge?.trim() ||
+    (hideAvailability ? EVENT_CONTEXT_DEFAULT_AGE : "");
+  const displayPurpose =
+    params.playerPurpose?.trim() ||
+    (hideAvailability ? EVENT_CONTEXT_DEFAULT_PURPOSE : "");
+  const displayTags = useMemo(() => {
+    const fromParam = parseTagsParam(params.playerTags);
+    if (fromParam && fromParam.length > 0) return fromParam;
+    if (hideAvailability) return [...EVENT_CONTEXT_DEFAULT_TAGS];
+    return [];
+  }, [params.playerTags, hideAvailability]);
 
   const availability = useMemo(
     () => mockAvailabilitySlots(playerId),
     [playerId]
   );
+
+  const handleFooterPress = () => {
+    if (isOrganizer) {
+      router.push({
+        pathname: "/chat-conversation",
+        params: {
+          playerId: `organizer-${playerName}`,
+          playerName,
+          sportEmoji,
+        },
+      });
+      return;
+    }
+    router.back();
+  };
+
+  const footerLabel = isOrganizer ? "Message Organizer" : "Message & Plan";
 
   return (
     <>
@@ -91,7 +141,8 @@ export default function PlayerProfileScreen() {
           <Text style={styles.name}>{playerName}</Text>
 
           <Text style={styles.sportSkill}>
-            {sportEmoji} {playerSkill}
+            {sportEmoji}
+            {playerSkill ? ` ${playerSkill}` : ""}
           </Text>
 
           {playerLocation ? (
@@ -101,47 +152,61 @@ export default function PlayerProfileScreen() {
             </View>
           ) : null}
 
-          {playerAge ? (
-            <Text style={styles.age}>Age {playerAge}</Text>
+          {displayAge ? (
+            <Text style={styles.age}>Age {displayAge}</Text>
           ) : null}
 
-          {playerPurpose ? (
+          {displayPurpose ? (
             <View style={styles.purposeBadge}>
-              <Text style={styles.purposeText}>{playerPurpose}</Text>
+              <Text style={styles.purposeText}>{displayPurpose}</Text>
             </View>
           ) : null}
 
-          <Text style={styles.sectionLabel}>Availability</Text>
-          <View style={styles.availabilityCard}>
-            <View style={styles.availabilityHeaderRow}>
-              <View style={styles.timeLabelSpacer} />
-              {DAYS.map((day, dayIndex) => (
-                <Text key={`h-${dayIndex}`} style={styles.dayLabel}>
-                  {day}
-                </Text>
+          {displayTags.length > 0 ? (
+            <View style={styles.tagsRow}>
+              {displayTags.map((tag) => (
+                <View key={tag} style={styles.tagPill}>
+                  <Text style={styles.tagPillText}>{tag}</Text>
+                </View>
               ))}
             </View>
-            {[0, 1, 2].map((time) => (
-              <View key={time} style={styles.availabilityRow}>
-                <Text style={styles.timeLabel}>{TIMES[time]}</Text>
-                {DAYS.map((_, dayIndex) => {
-                  const key = `${dayIndex}-${time}`;
-                  const selected = availability.has(key);
-                  return (
-                    <View
-                      key={key}
-                      style={[
-                        styles.availabilityCell,
-                        selected
-                          ? styles.availabilityCellOn
-                          : styles.availabilityCellOff,
-                      ]}
-                    />
-                  );
-                })}
+          ) : null}
+
+          {!hideAvailability ? (
+            <>
+              <Text style={styles.sectionLabel}>Availability</Text>
+              <View style={styles.availabilityCard}>
+                <View style={styles.availabilityHeaderRow}>
+                  <View style={styles.timeLabelSpacer} />
+                  {DAYS.map((day, dayIndex) => (
+                    <Text key={`h-${dayIndex}`} style={styles.dayLabel}>
+                      {day}
+                    </Text>
+                  ))}
+                </View>
+                {[0, 1, 2].map((time) => (
+                  <View key={time} style={styles.availabilityRow}>
+                    <Text style={styles.timeLabel}>{TIMES[time]}</Text>
+                    {DAYS.map((_, dayIndex) => {
+                      const key = `${dayIndex}-${time}`;
+                      const selected = availability.has(key);
+                      return (
+                        <View
+                          key={key}
+                          style={[
+                            styles.availabilityCell,
+                            selected
+                              ? styles.availabilityCellOn
+                              : styles.availabilityCellOff,
+                          ]}
+                        />
+                      );
+                    })}
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
+            </>
+          ) : null}
         </ScrollView>
 
         <View
@@ -151,13 +216,13 @@ export default function PlayerProfileScreen() {
           ]}
         >
           <Pressable
-            onPress={() => router.back()}
+            onPress={handleFooterPress}
             style={({ pressed }) => [
               styles.cta,
               pressed && styles.ctaPressed,
             ]}
           >
-            <Text style={styles.ctaText}>Message & Plan</Text>
+            <Text style={styles.ctaText}>{footerLabel}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -251,13 +316,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 999,
-    marginBottom: 24,
+    marginBottom: 12,
   },
   purposeText: {
     color: "#ffffff",
     fontSize: 14,
     fontWeight: "700",
     textAlign: "center",
+  },
+  tagsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 24,
+    alignSelf: "stretch",
+  },
+  tagPill: {
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  tagPillText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: ACCENT_GREEN,
   },
   sectionLabel: {
     alignSelf: "stretch",

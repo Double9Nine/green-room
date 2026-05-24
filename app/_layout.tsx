@@ -45,6 +45,14 @@ export default function RootLayout() {
           name="my-player-card"
           options={{ headerShown: false }}
         />
+        <Stack.Screen
+          name="event-details"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="event-group-chat"
+          options={{ headerShown: false }}
+        />
       </Stack>
       <StatusBar style="auto" />
     </>

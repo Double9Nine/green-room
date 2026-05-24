@@ -14,6 +14,8 @@ export type StoredConversation = {
   lastMessageTime: number;
   unread: boolean;
   muted?: boolean;
+  isOrganizerChat?: boolean;
+  eventId?: string;
 };
 
 export async function loadStoredConversations(): Promise<StoredConversation[]> {
@@ -35,12 +37,15 @@ export async function upsertConversation(
   convo: StoredConversation
 ): Promise<void> {
   try {
+    if (!convo.isOrganizerChat) return;
     const convos = await loadStoredConversations();
-    const exists = convos.find((c) => c.id === convo.id);
-    if (!exists) {
+    const idx = convos.findIndex((c) => c.id === convo.id);
+    if (idx === -1) {
       convos.unshift(convo);
-      await saveConversations(convos);
+    } else {
+      convos[idx] = { ...convos[idx], ...convo };
     }
+    await saveConversations(convos);
   } catch {
     // ignore persistence errors
   }
@@ -54,7 +59,7 @@ export async function updateConversationPreview(
   try {
     const convos = await loadStoredConversations();
     const idx = convos.findIndex((c) => c.id === id);
-    if (idx === -1) return;
+    if (idx === -1 || !convos[idx].isOrganizerChat) return;
 
     const updated: StoredConversation = {
       ...convos[idx],

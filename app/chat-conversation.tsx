@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
@@ -28,11 +29,7 @@ import {
 import { ChatVenueFinderModal } from "@/components/ChatVenueFinderModal";
 import { MATCH_SPORTS } from "@/constants/matchSports";
 import type { VenueSharePayload } from "@/constants/nearbyVenues";
-import {
-  markConversationRead,
-  updateConversationPreview,
-  upsertConversation,
-} from "@/lib/conversationsStorage";
+import { CONVERSATIONS_STORAGE_KEY } from "@/lib/conversationsStorage";
 import { convertVoiceToText } from "@/lib/convertVoiceToText";
 
 const DARK_GREEN = "#052e16";
@@ -85,6 +82,8 @@ type PlayerRouteParams = {
   playerSkill: string;
   playerPurpose: string;
   sportEmoji: string;
+  isOrganizerChat: boolean;
+  eventId: string;
 };
 
 function buildPlayerParams(
@@ -104,6 +103,8 @@ function buildPlayerParams(
     playerSkill: str("playerSkill"),
     playerPurpose: str("playerPurpose"),
     sportEmoji: str("sportEmoji") || "🎾",
+    isOrganizerChat: str("isOrganizerChat") === "true",
+    eventId: str("eventId"),
   };
 }
 
@@ -334,6 +335,8 @@ export default function ChatConversationScreen() {
     playerSkill?: string;
     playerPurpose?: string;
     sportEmoji?: string;
+    isOrganizerChat?: string;
+    eventId?: string;
   }>();
 
   const playerParams = useMemo(
@@ -341,12 +344,23 @@ export default function ChatConversationScreen() {
     [rawParams]
   );
 
-  const { playerName, playerLocation, playerSkill, sportEmoji } = playerParams;
+  const {
+    playerName,
+    playerLocation,
+    playerSkill,
+    sportEmoji,
+    isOrganizerChat,
+    eventId,
+  } = playerParams;
 
-  const conversationId = useMemo(
-    () => playerParams.playerId || `convo-${Date.now()}`,
-    [playerParams.playerId]
-  );
+  const playerId =
+    playerParams.playerId || `convo-${playerParams.playerName}`;
+  const isOrganizerChatParam =
+    typeof rawParams.isOrganizerChat === "string"
+      ? rawParams.isOrganizerChat
+      : isOrganizerChat
+        ? "true"
+        : "";
 
   const matchSport = useMemo(
     () => MATCH_SPORTS.find((s) => s.emoji === sportEmoji),
@@ -368,6 +382,8 @@ export default function ChatConversationScreen() {
       createdAt: Date.now(),
     },
   ]);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const [fullImageUri, setFullImageUri] = useState<string | null>(null);
   const [voiceInputMode, setVoiceInputMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -411,76 +427,149 @@ export default function ChatConversationScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    const saveConversation = async () => {
-      await upsertConversation({
-        id: conversationId,
-        playerName: playerParams.playerName,
-        playerLocation: playerParams.playerLocation,
-        playerSkill: playerParams.playerSkill,
-        playerPurpose: playerParams.playerPurpose,
-        playerAge: playerParams.playerAge,
-        sportEmoji: playerParams.sportEmoji,
-        lastMessage: welcomeText,
-        lastMessageTime: Date.now(),
-        unread: true,
-      });
-      await markConversationRead(conversationId);
-    };
-    void saveConversation();
-  }, [conversationId, playerParams, welcomeText]);
+  const saveConversation = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(CONVERSATIONS_STORAGE_KEY);
+      const convos = raw ? (JSON.parse(raw) as Record<string, unknown>[]) : [];
 
-  const syncConversationPreview = useCallback(
-    (lastMessage: string) => {
-      void updateConversationPreview(conversationId, lastMessage);
+      const msgs = messagesRef.current;
+      const convoData = {
+        id: playerId,
+        playerName,
+        sportEmoji: sportEmoji || "🎾",
+        playerSkill: playerSkill || "",
+        playerLocation: playerLocation || "",
+        playerPurpose: playerParams.playerPurpose || "",
+        playerAge: playerParams.playerAge || "",
+        lastMessage: msgs[msgs.length - 1]?.text || "",
+        lastMessageTime: Date.now(),
+        unread: false,
+        isOrganizerChat: isOrganizerChatParam === "true",
+        eventId: eventId || null,
+      };
+
+      const existing = convos.findIndex(
+        (c: { playerName?: string }) => c.playerName === playerName
+      );
+
+      if (existing >= 0) {
+        convos[existing] = { ...convos[existing], ...convoData };
+      } else {
+        convos.unshift(convoData);
+      }
+
+      await AsyncStorage.setItem(
+        CONVERSATIONS_STORAGE_KEY,
+        JSON.stringify(convos)
+      );
+    } catch (e) {
+      console.log("Save conversation error:", e);
+    }
+  }, [
+    eventId,
+    isOrganizerChatParam,
+    playerId,
+    playerLocation,
+    playerName,
+    playerParams.playerAge,
+    playerParams.playerPurpose,
+    playerSkill,
+    sportEmoji,
+  ]);
+
+  const updateLastMessage = useCallback(
+    async (text: string) => {
+      try {
+        const raw = await AsyncStorage.getItem(CONVERSATIONS_STORAGE_KEY);
+        const convos = raw ? (JSON.parse(raw) as Record<string, unknown>[]) : [];
+        const updated = convos.map((c: { playerName?: string }) =>
+          c.playerName === playerName
+            ? { ...c, lastMessage: text, lastMessageTime: Date.now() }
+            : c
+        );
+        await AsyncStorage.setItem(
+          CONVERSATIONS_STORAGE_KEY,
+          JSON.stringify(updated)
+        );
+      } catch {
+        // ignore
+      }
     },
-    [conversationId]
+    [playerName]
   );
+
+  const persistAfterSend = useCallback(
+    async (previewText: string) => {
+      await saveConversation();
+      if (previewText) {
+        await updateLastMessage(previewText);
+      }
+    },
+    [saveConversation, updateLastMessage]
+  );
+
+  useEffect(() => {
+    void saveConversation();
+  }, []);
 
   const appendMessage = useCallback(
     (msg: Omit<ChatMessage, "id" | "createdAt">) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          ...msg,
-          id: `msg-${Date.now()}-${Math.random()}`,
-          createdAt: Date.now(),
-        },
-      ]);
+      setMessages((prev) => {
+        const next = [
+          ...prev,
+          {
+            ...msg,
+            id: `msg-${Date.now()}-${Math.random()}`,
+            createdAt: Date.now(),
+          },
+        ];
+        messagesRef.current = next;
+        return next;
+      });
       scrollToEnd();
       const preview = getSentMessagePreview(msg);
-      if (preview) {
-        syncConversationPreview(preview);
-      }
+      void persistAfterSend(preview ?? "");
     },
-    [scrollToEnd, syncConversationPreview]
+    [persistAfterSend, scrollToEnd]
   );
 
   const openProfile = () => {
     router.push({
       pathname: "/player-profile",
-      params: { ...playerParams },
+      params: {
+        playerId: playerParams.playerId,
+        playerName: playerParams.playerName,
+        playerAge: playerParams.playerAge,
+        playerLocation: playerParams.playerLocation,
+        playerSkill: playerParams.playerSkill,
+        playerPurpose: playerParams.playerPurpose,
+        sportEmoji: playerParams.sportEmoji,
+      },
     });
   };
 
   const sendTextMessage = useCallback(() => {
     const text = inputText.trim();
     if (!text) return;
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `msg-${Date.now()}-${Math.random()}`,
-        type: "text",
-        text,
-        sent: true,
-        createdAt: Date.now(),
-      },
-    ]);
+    setMessages((prev) => {
+      const next = [
+        ...prev,
+        {
+          id: `msg-${Date.now()}-${Math.random()}`,
+          type: "text" as const,
+          text,
+          sent: true,
+          createdAt: Date.now(),
+        },
+      ];
+      messagesRef.current = next;
+      return next;
+    });
     setInputText("");
     scrollToEnd();
-    syncConversationPreview(text);
+    void persistAfterSend(text);
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [inputText, scrollToEnd, syncConversationPreview]);
+  }, [inputText, persistAfterSend, scrollToEnd]);
 
   const sendPhoto = useCallback(
     (uri: string) => {

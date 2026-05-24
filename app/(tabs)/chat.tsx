@@ -21,6 +21,10 @@ import {
   removeConversation,
   type StoredConversation,
 } from "@/lib/conversationsStorage";
+import {
+  loadGroupChatConversations,
+  type StoredGroupChatConversation,
+} from "@/lib/groupChatConversationsStorage";
 
 const MUTED_CONVERSATIONS_KEY = "mutedConversations";
 
@@ -47,6 +51,53 @@ function formatConversationTime(timestamp: number) {
   }
 
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function GroupChatRow({
+  convo,
+  onPress,
+}: {
+  convo: StoredGroupChatConversation;
+  onPress: () => void;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const animateScale = (toValue: number) => {
+    Animated.spring(scale, {
+      toValue,
+      friction: 8,
+      tension: 120,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <Animated.View style={[styles.convoCard, { transform: [{ scale }] }]}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={() => animateScale(0.97)}
+        onPressOut={() => animateScale(1)}
+        style={styles.cardPressable}
+      >
+        <View style={styles.groupChatAvatar}>
+          <Text style={styles.groupChatAvatarEmoji}>{convo.sportEmoji}</Text>
+        </View>
+        <View style={styles.convoBody}>
+          <View style={styles.convoTop}>
+            <Text style={styles.convoName} numberOfLines={1}>
+              {convo.eventTitle}
+            </Text>
+            <Text style={styles.convoTime}>
+              {formatConversationTime(convo.lastMessageTime)}
+            </Text>
+          </View>
+          <Text style={styles.convoPreview} numberOfLines={1}>
+            {convo.lastMessage}
+          </Text>
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
 }
 
 function ConversationRow({
@@ -141,16 +192,26 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [conversations, setConversations] = useState<StoredConversation[]>([]);
+  const [groupChats, setGroupChats] = useState<StoredGroupChatConversation[]>(
+    []
+  );
   const [mutedIds, setMutedIds] = useState<string[]>([]);
   const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
 
+  const loadConversations = useCallback(async () => {
+    const convos = await loadStoredConversations();
+    setConversations(convos);
+  }, []);
+
+  const loadGroupChats = useCallback(async () => {
+    const groups = await loadGroupChatConversations();
+    setGroupChats(groups);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      const loadConversations = async () => {
-        const convos = await loadStoredConversations();
-        setConversations(convos);
-      };
       void loadConversations();
+      void loadGroupChats();
 
       AsyncStorage.getItem(MUTED_CONVERSATIONS_KEY).then((val) => {
         if (val) {
@@ -164,7 +225,7 @@ export default function ChatScreen() {
           setMutedIds([]);
         }
       });
-    }, [])
+    }, [loadConversations, loadGroupChats])
   );
 
   const closeAllSwipeables = useCallback(() => {
@@ -189,6 +250,20 @@ export default function ChatScreen() {
         playerSkill: convo.playerSkill,
         playerPurpose: convo.playerPurpose ?? "",
         sportEmoji: convo.sportEmoji,
+        isOrganizerChat: convo.isOrganizerChat ? "true" : "",
+        eventId: convo.eventId ?? "",
+      },
+    });
+  };
+
+  const openGroupChat = (convo: StoredGroupChatConversation) => {
+    router.push({
+      pathname: "/event-group-chat",
+      params: {
+        eventId: convo.eventId,
+        eventTitle: convo.eventTitle,
+        sportEmoji: convo.sportEmoji,
+        organizer: convo.organizer ?? "Organizer",
       },
     });
   };
@@ -284,14 +359,14 @@ export default function ChatScreen() {
 
         <View style={styles.titleUnderline} />
 
-        {conversations.length === 0 ? (
+        {groupChats.length === 0 && conversations.length === 0 ? (
           <>
             <View style={styles.card}>
               <View style={styles.cardStripe} />
               <Text style={styles.cardHeading}>No conversations yet</Text>
               <Text style={styles.cardBody}>
-                When you match with players, your threads will show up here. Tap
-                Match to set your preferences and find people at your level.
+                Join or host an event to message organizers and your group, or
+                tap Match to find players.
               </Text>
             </View>
 
@@ -303,19 +378,45 @@ export default function ChatScreen() {
           </>
         ) : (
           <View style={styles.list}>
-            {conversations.map((convo) => (
-              <ConversationRow
-                key={convo.id}
-                convo={convo}
-                isMuted={mutedIds.includes(convo.id)}
-                swipeableRef={(ref) => {
-                  swipeableRefs.current[convo.id] = ref;
-                }}
-                onSwipeableWillOpen={() => closeOtherSwipeables(convo.id)}
-                renderRightActions={renderRightActions(convo)}
-                onPress={() => openConversation(convo)}
-              />
-            ))}
+            {groupChats.length > 0 ? (
+              <>
+                <Text style={styles.sectionHeading}>Group Chats</Text>
+                {groupChats.map((convo) => (
+                  <View key={convo.eventId} style={styles.swipeRow}>
+                    <GroupChatRow
+                      convo={convo}
+                      onPress={() => openGroupChat(convo)}
+                    />
+                  </View>
+                ))}
+              </>
+            ) : null}
+
+            {conversations.length > 0 ? (
+              <>
+                <Text
+                  style={[
+                    styles.sectionHeading,
+                    groupChats.length > 0 && styles.sectionHeadingSpaced,
+                  ]}
+                >
+                  Direct Messages
+                </Text>
+                {conversations.map((convo) => (
+                  <ConversationRow
+                    key={convo.id}
+                    convo={convo}
+                    isMuted={mutedIds.includes(convo.id)}
+                    swipeableRef={(ref) => {
+                      swipeableRefs.current[convo.id] = ref;
+                    }}
+                    onSwipeableWillOpen={() => closeOtherSwipeables(convo.id)}
+                    renderRightActions={renderRightActions(convo)}
+                    onPress={() => openConversation(convo)}
+                  />
+                ))}
+              </>
+            ) : null}
           </View>
         )}
       </ScrollView>
@@ -417,6 +518,27 @@ const styles = StyleSheet.create({
     marginTop: 24,
     alignSelf: "stretch",
     width: "100%",
+  },
+  sectionHeading: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: ACCENT_DARK,
+    marginBottom: 8,
+    alignSelf: "flex-start",
+  },
+  sectionHeadingSpaced: {
+    marginTop: 20,
+  },
+  groupChatAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#dcfce7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupChatAvatarEmoji: {
+    fontSize: 24,
   },
   swipeRow: {
     marginVertical: 6,
