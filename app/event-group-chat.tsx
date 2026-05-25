@@ -41,6 +41,7 @@ import type { VenueSharePayload } from "@/constants/nearbyVenues";
 import { getCurrentUser, type CurrentUser } from "../lib/getCurrentUser";
 import { convertVoiceToText } from "../lib/convertVoiceToText";
 import { upsertGroupChatConversation } from "../lib/groupChatConversationsStorage";
+import { incrementUnreadGroup } from "../lib/notificationStore";
 import {
   applyMessagesForViewer,
   getGroupChatPreviewText,
@@ -252,14 +253,23 @@ export default function EventGroupChatScreen() {
   );
 
   const appendMessage = useCallback(
-    (partial: Omit<GroupChatMessage, "id" | "sender" | "initial" | "sent" | "time" | "createdAt">) => {
+    (
+      partial: Omit<
+        GroupChatMessage,
+        "id" | "sender" | "initial" | "sent" | "time" | "createdAt"
+      > & { sent?: boolean }
+    ) => {
       const user = currentUser;
+      const isSent = partial.sent ?? true;
+      if (!isSent) {
+        void incrementUnreadGroup();
+      }
       const newMsg = normalizeGroupChatMessage({
         ...partial,
         id: `msg-${Date.now()}-${Math.random()}`,
         sender: user.name,
         initial: user.initial,
-        sent: true,
+        sent: isSent,
         time: formatMessageTime(new Date()),
         createdAt: Date.now(),
       });

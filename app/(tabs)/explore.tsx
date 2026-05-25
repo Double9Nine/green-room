@@ -2,7 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import {
+  Children,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -23,18 +31,22 @@ import {
 import {
   approveJoinRequest,
   buildConfirmedMembersList,
+  cancelJoinRequest,
+  CURRENT_USER_ID,
   declineJoinRequest,
   ensureDemoEventSeed,
+  EVENT_MEMBERS_KEY,
+  EVENT_REQUESTS_KEY,
   formatRequestAgo,
   getConfirmedForEvent,
   getMyStatusFromList,
   getPendingForEvent,
   leaveEvent,
   loadEventMembers,
-  seedDemoPendingForEvent,
   loadEventRequests,
   loadPendingRequests,
   resolveEventSpotsAndMembers,
+  submitJoinRequest,
   type EventRequest,
   type EventRequestsByEvent,
   type MemberStatus,
@@ -42,6 +54,12 @@ import {
 import { getCurrentUser } from "../../lib/getCurrentUser";
 import { upsertGroupChatConversation } from "../../lib/groupChatConversationsStorage";
 import { loadGroupChatMessages } from "../../lib/groupChatStorage";
+import {
+  clearJoinedStatusChanges,
+  clearPendingRequests,
+  getJoinedStatusChangesCount,
+  getPendingRequestsCount,
+} from "../../lib/notificationStore";
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -133,6 +151,9 @@ export type PlazaEvent = {
   details?: string;
   dateLabel?: string;
   timeLabel?: string;
+  status?: string;
+  attended?: boolean;
+  attendanceAnswered?: boolean;
 };
 
 type PlacePrediction = {
@@ -159,6 +180,257 @@ function withOrganizer(
   };
 }
 
+function resolvePlazaEventFromRequest(
+  req: EventRequest,
+  events: PlazaEvent[]
+): PlazaEvent | null {
+  const stored = req.eventData as PlazaEvent | undefined;
+  if (stored && typeof stored === "object" && typeof stored.id === "number") {
+    if (!stored.organizer) {
+      return withOrganizer(
+        stored as Omit<PlazaEvent, "organizer" | "organizerInitial">
+      );
+    }
+    return stored;
+  }
+  return events.find((e) => e.id === req.eventId) ?? null;
+}
+
+function isEventExpired(
+  eventData: { time?: string } | string | null | undefined
+): boolean {
+  if (!eventData) return false;
+  const timeStr =
+    typeof eventData === "string" ? eventData : eventData.time || "";
+  if (!timeStr) return false;
+
+  const direct = new Date(timeStr).getTime();
+  if (!isNaN(direct)) return direct < Date.now();
+
+  const match = timeStr.match(/^(\w+),\s+(\w+)\s+(\d+),\s+(\d+):(\d+)$/);
+  if (match) {
+    const MONTHS: Record<string, number> = {
+      Jan: 0,
+      Feb: 1,
+      Mar: 2,
+      Apr: 3,
+      May: 4,
+      Jun: 5,
+      Jul: 6,
+      Aug: 7,
+      Sep: 8,
+      Oct: 9,
+      Nov: 10,
+      Dec: 11,
+    };
+    const month = MONTHS[match[2]];
+    if (month !== undefined) {
+      const d = new Date(
+        new Date().getFullYear(),
+        month,
+        parseInt(match[3], 10),
+        parseInt(match[4], 10),
+        parseInt(match[5], 10),
+        0
+      );
+      return d.getTime() < Date.now();
+    }
+  }
+  return false;
+}
+
+function CollapsibleSection({
+  title,
+  count,
+  defaultExpanded = false,
+  showWhenEmpty = false,
+  children,
+}: {
+  title: string;
+  count: number;
+  defaultExpanded?: boolean;
+  /** Past sections: always visible with empty state when count is 0 */
+  showWhenEmpty?: boolean;
+  children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  if (count === 0 && !showWhenEmpty) return null;
+
+  return (
+    <View style={styles.collapsibleSection}>
+      <Pressable
+        onPress={() => setExpanded(!expanded)}
+        style={[
+          styles.collapsibleHeader,
+          expanded && styles.collapsibleHeaderExpanded,
+        ]}
+      >
+        <Text style={styles.collapsibleTitle}>
+          {title} ({count})
+        </Text>
+        <Ionicons
+          name={expanded ? "chevron-up" : "chevron-down"}
+          size={20}
+          color={MUTED}
+        />
+      </Pressable>
+      {expanded ? (
+        <View style={styles.collapsibleBody}>
+          {count === 0 &&
+          showWhenEmpty &&
+          Children.count(children) === 0 ? (
+            <View style={styles.collapsibleEmpty}>
+              <Text style={styles.collapsibleEmptyText}>No events yet</Text>
+            </View>
+          ) : (
+            children
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function PastEventCard({
+  event,
+  badge,
+  badgeColor,
+  badgeTextColor,
+  onPress,
+}: {
+  event: PlazaEvent;
+  badge: string;
+  badgeColor: string;
+  badgeTextColor: string;
+  onPress?: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.joinedStatusCard,
+        styles.joinedAccentExpired,
+        styles.pastEventCard,
+      ]}
+    >
+      <Text style={styles.joinedStatusTitle}>{event.title}</Text>
+      <Text style={styles.joinedStatusMeta}>
+        {event.sport} · {formatEventTime(event.time)}
+      </Text>
+      <Text style={styles.joinedStatusMeta}>📍 {event.location}</Text>
+      <View style={[styles.pastEventBadge, { backgroundColor: badgeColor }]}>
+        <Text style={[styles.pastEventBadgeText, { color: badgeTextColor }]}>
+          {badge}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function DismissableCard({
+  event,
+  badge,
+  badgeColor,
+  badgeTextColor,
+  onDismiss,
+  onRequestAgain,
+  showRequestAgain = false,
+  onCardPress,
+}: {
+  event: PlazaEvent;
+  badge: string;
+  badgeColor: string;
+  badgeTextColor: string;
+  onDismiss: () => void;
+  onRequestAgain?: () => void;
+  showRequestAgain?: boolean;
+  onCardPress?: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onCardPress}
+      style={[styles.joinedStatusCard, styles.joinedAccentExpired, styles.dismissableCard]}
+    >
+      <Text style={styles.joinedStatusTitle}>{event.title}</Text>
+      <Text style={styles.joinedStatusMeta}>
+        {event.sport} · {formatEventTime(event.time)}
+      </Text>
+      <Text style={styles.joinedStatusMeta}>📍 {event.location}</Text>
+      <View style={[styles.pastEventBadge, { backgroundColor: badgeColor }]}>
+        <Text style={[styles.pastEventBadgeText, { color: badgeTextColor }]}>
+          {badge}
+        </Text>
+      </View>
+      <View style={styles.joinedCardActions}>
+        {showRequestAgain ? (
+          <Pressable
+            onPress={(e) => {
+              stopCardPress(e);
+              onRequestAgain?.();
+            }}
+            hitSlop={8}
+          >
+            <Text style={styles.joinedTextBtnGreen}>Request Again</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={(e) => {
+            stopCardPress(e);
+            onDismiss();
+          }}
+          hitSlop={8}
+        >
+          <Text style={styles.joinedTextBtnGray}>Dismiss</Text>
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+}
+
+type JoinedStatusCardProps = {
+  event: PlazaEvent;
+  variant: "pending";
+  onCardPress: () => void;
+  onCancel?: () => void;
+};
+
+function JoinedStatusCard({
+  event,
+  variant,
+  onCardPress,
+  onCancel,
+}: JoinedStatusCardProps) {
+  return (
+    <Pressable
+      onPress={onCardPress}
+      style={[styles.joinedStatusCard, styles.joinedAccentYellow]}
+    >
+      <Text style={styles.joinedStatusTitle}>{event.title}</Text>
+      <Text style={styles.joinedStatusMeta}>
+        {event.sport} · {formatEventTime(event.time)}
+      </Text>
+      <Text style={styles.joinedStatusMeta}>📍 {event.location}</Text>
+      {variant === "pending" ? (
+        <View style={styles.joinedBadgePending}>
+          <Text style={styles.joinedBadgePendingText}>⏳ Awaiting Approval</Text>
+        </View>
+      ) : null}
+      <View style={styles.joinedCardActions}>
+        <Pressable
+          onPress={(e) => {
+            stopCardPress(e);
+            onCancel?.();
+          }}
+          hitSlop={8}
+        >
+          <Text style={styles.joinedTextBtnGray}>Cancel Request</Text>
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+}
+
 const DUMMY_EVENTS: PlazaEvent[] = [
   withOrganizer({
     id: 1,
@@ -167,7 +439,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Morning Tennis Singles Match",
     location: "Central Park Tennis Courts, NY",
     distance: "0.8 mi",
-    time: "Today, 9:00 AM",
+    time: "2026-06-10T09:00:00",
     postedAgo: "1h ago",
     spots: 2,
     maxSpots: 2,
@@ -182,7 +454,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Pickleball Beginner Meetup",
     location: "Hudson Yards Courts, NY",
     distance: "1.2 mi",
-    time: "Today, 11:00 AM",
+    time: "2026-06-10T11:00:00",
     postedAgo: "2h ago",
     spots: 3,
     maxSpots: 6,
@@ -197,7 +469,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Padel Doubles Session",
     location: "Padel Haus, Brooklyn",
     distance: "2.1 mi",
-    time: "Tomorrow, 7:00 PM",
+    time: "2026-06-11T19:00:00",
     postedAgo: "3h ago",
     spots: 2,
     maxSpots: 4,
@@ -212,7 +484,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Central Park 5K Group Run",
     location: "Central Park, NY",
     distance: "0.5 mi",
-    time: "Today, 6:30 AM",
+    time: "2026-06-10T06:30:00",
     postedAgo: "30m ago",
     spots: 8,
     maxSpots: 15,
@@ -227,7 +499,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Sunday Soccer Pickup Game",
     location: "Pier 40 Soccer Fields, NY",
     distance: "1.5 mi",
-    time: "Sun, 10:00 AM",
+    time: "2026-06-14T10:00:00",
     postedAgo: "4h ago",
     spots: 6,
     maxSpots: 14,
@@ -242,7 +514,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "3v3 Basketball Pickup",
     location: "West 4th Street Courts, NY",
     distance: "0.9 mi",
-    time: "Tomorrow, 5:00 PM",
+    time: "2026-06-11T17:00:00",
     postedAgo: "5h ago",
     spots: 2,
     maxSpots: 6,
@@ -257,7 +529,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Beach Volleyball Session",
     location: "Rockaway Beach, Queens",
     distance: "8.2 mi",
-    time: "Sat, 1:00 PM",
+    time: "2026-06-13T13:00:00",
     postedAgo: "6h ago",
     spots: 4,
     maxSpots: 12,
@@ -272,7 +544,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Casual Badminton Session",
     location: "YMCA Courts, Brooklyn",
     distance: "2.1 mi",
-    time: "Tomorrow, 7:00 PM",
+    time: "2026-06-11T19:00:00",
     postedAgo: "7h ago",
     spots: 3,
     maxSpots: 4,
@@ -287,7 +559,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Indoor Bouldering Session",
     location: "Brooklyn Boulders, Brooklyn",
     distance: "2.5 mi",
-    time: "Tomorrow, 6:00 PM",
+    time: "2026-06-11T18:00:00",
     postedAgo: "8h ago",
     spots: 5,
     maxSpots: 8,
@@ -302,7 +574,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Sunday Morning Bike Ride",
     location: "Hudson River Greenway, NY",
     distance: "0.3 mi",
-    time: "Sun, 8:00 AM",
+    time: "2026-06-14T08:00:00",
     postedAgo: "9h ago",
     spots: 6,
     maxSpots: 10,
@@ -317,7 +589,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Kickball Pickup Game",
     location: "McCarren Park, Brooklyn",
     distance: "3.1 mi",
-    time: "Sat, 3:00 PM",
+    time: "2026-06-13T15:00:00",
     postedAgo: "10h ago",
     spots: 7,
     maxSpots: 16,
@@ -332,7 +604,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Co-ed Softball Game",
     location: "Heckscher Fields, Central Park",
     distance: "1.4 mi",
-    time: "Sun, 11:00 AM",
+    time: "2026-06-14T11:00:00",
     postedAgo: "11h ago",
     spots: 5,
     maxSpots: 18,
@@ -347,7 +619,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Flag Football Pickup Game",
     location: "Randalls Island, NY",
     distance: "4.2 mi",
-    time: "Sat, 2:00 PM",
+    time: "2026-06-13T14:00:00",
     postedAgo: "12h ago",
     spots: 4,
     maxSpots: 14,
@@ -362,7 +634,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Bowling Night Out",
     location: "Bowlero Manhattan, NY",
     distance: "1.8 mi",
-    time: "Fri, 8:00 PM",
+    time: "2026-06-13T20:00:00",
     postedAgo: "13h ago",
     spots: 3,
     maxSpots: 8,
@@ -377,7 +649,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Table Tennis Round Robin",
     location: "Fat Cat, Greenwich Village",
     distance: "1.1 mi",
-    time: "Thu, 7:00 PM",
+    time: "2026-06-12T19:00:00",
     postedAgo: "14h ago",
     spots: 4,
     maxSpots: 8,
@@ -392,7 +664,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Sports Mixer & Happy Hour",
     location: "Slate NY, Midtown",
     distance: "2.3 mi",
-    time: "Fri, 6:30 PM",
+    time: "2026-06-12T18:30:00",
     postedAgo: "15h ago",
     spots: 12,
     maxSpots: 30,
@@ -407,7 +679,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Open Water Swimming Group",
     location: "Floating Pool, Brooklyn",
     distance: "3.5 mi",
-    time: "Sat, 7:30 AM",
+    time: "2026-06-13T07:30:00",
     postedAgo: "16h ago",
     spots: 5,
     maxSpots: 10,
@@ -422,7 +694,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Frisbee in the Park",
     location: "Prospect Park, Brooklyn",
     distance: "2.8 mi",
-    time: "Sun, 3:00 PM",
+    time: "2026-06-14T15:00:00",
     postedAgo: "17h ago",
     spots: 6,
     maxSpots: 12,
@@ -431,13 +703,42 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     details: "Ultimate frisbee casual game. No experience needed!",
   }),
   withOrganizer({
+    id: 97,
+    user: "Test Host",
+    sport: "Tennis",
+    title: "Test Expired Event - Member Flow",
+    location: "Central Park Tennis Courts, NY",
+    distance: "0.8 mi",
+    time: "2026-05-24T20:57:00",
+    spots: 3,
+    maxSpots: 4,
+    likes: 5,
+    comments: 2,
+    details: "Test event for member expiration flow.",
+  }),
+  withOrganizer({
+    id: 98,
+    user: "Past User",
+    sport: "Tennis",
+    title: "Past Tennis Match (Test)",
+    location: "Central Park, NY",
+    distance: "0.8 mi",
+    time: "2024-01-01T09:00:00",
+    postedAgo: "1y ago",
+    spots: 2,
+    maxSpots: 4,
+    likes: 5,
+    comments: 2,
+    details: "This is a past event for testing expired status.",
+  }),
+  withOrganizer({
     id: 99,
     user: "Tommy K.",
     sport: "Basketball",
     title: "Full Court 5v5 Basketball",
     location: "West 4th Street Courts, NY",
     distance: "1.1 mi",
-    time: "Today, 6:00 PM",
+    time: "2026-06-10T18:00:00",
     postedAgo: "Just now",
     spots: 10,
     maxSpots: 10,
@@ -477,6 +778,18 @@ function formatDate(d: Date) {
 function formatTime(d: Date) {
   return d.toLocaleTimeString(undefined, {
     hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function formatEventTime(timeStr: string): string {
+  const date = new Date(timeStr);
+  if (isNaN(date.getTime())) return timeStr;
+  return date.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
   });
 }
@@ -531,7 +844,7 @@ function EventCard({
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `${event.title} — ${event.location} · ${event.time}`,
+        message: `${event.title} — ${event.location} · ${formatEventTime(event.time)}`,
       });
     } catch {
       /* user dismissed */
@@ -606,7 +919,7 @@ function EventCard({
       </View>
 
       <View style={styles.eventInfoRow}>
-        <Text style={styles.eventInfoLeft}>🕐 {event.time}</Text>
+        <Text style={styles.eventInfoLeft}>🕐 {formatEventTime(event.time)}</Text>
       </View>
 
       <View style={styles.eventActionsRow}>
@@ -715,6 +1028,8 @@ export default function ExploreScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [subTab, setSubTab] = useState<SubTab>("discover");
+  const [myEventsBadge, setMyEventsBadge] = useState(0);
+  const [joinedBadge, setJoinedBadge] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedSport, setSelectedSport] = useState("All Sports");
   const [sortBy, setSortBy] = useState<(typeof SORT_OPTIONS)[number]>("Latest");
@@ -722,6 +1037,12 @@ export default function ExploreScreen() {
   const [joinedIds, setJoinedIds] = useState<number[]>([]);
   const [likedIds, setLikedIds] = useState<Set<number>>(new Set());
   const [eventRequestsList, setEventRequestsList] = useState<EventRequest[]>([]);
+  const [confirmedJoined, setConfirmedJoined] = useState<EventRequest[]>([]);
+  const [pendingJoined, setPendingJoined] = useState<EventRequest[]>([]);
+  const [declinedJoined, setDeclinedJoined] = useState<EventRequest[]>([]);
+  const [removedJoined, setRemovedJoined] = useState<EventRequest[]>([]);
+  const [expiredJoined, setExpiredJoined] = useState<EventRequest[]>([]);
+  const [pastJoined, setPastJoined] = useState<EventRequest[]>([]);
   const [pendingMap, setPendingMap] = useState<EventRequestsByEvent>({});
   const [eventMembersMap, setEventMembersMap] = useState<EventRequestsByEvent>({});
   const [requestsModalEvent, setRequestsModalEvent] = useState<PlazaEvent | null>(
@@ -776,11 +1097,255 @@ export default function ExploreScreen() {
     }
   }, []);
 
+  const loadJoinedRequests = useCallback(async () => {
+    try {
+      const requests = await loadEventRequests();
+      const mine = requests.filter((r) => r.userId === CURRENT_USER_ID);
+      const confirmedList: EventRequest[] = [];
+      const pendingList: EventRequest[] = [];
+      const declinedList: EventRequest[] = [];
+      const removedList: EventRequest[] = [];
+      const expiredList: EventRequest[] = [];
+      const pastList: EventRequest[] = [];
+
+      mine.forEach((r) => {
+        const eventData = r.eventData as { time?: string } | undefined;
+        if (r.status === "past" && r.attended === true) {
+          pastList.push(r);
+        } else if (r.status === "confirmed" && !isEventExpired(eventData)) {
+          confirmedList.push(r);
+        } else if (r.status === "rejected") {
+          declinedList.push(r);
+        } else if (r.status === "removed") {
+          removedList.push(r);
+        } else if (r.status === "pending") {
+          if (isEventExpired(eventData)) {
+            expiredList.push(r);
+          } else {
+            pendingList.push(r);
+          }
+        }
+      });
+
+      setConfirmedJoined(confirmedList);
+      setPendingJoined(pendingList);
+      setDeclinedJoined(declinedList);
+      setRemovedJoined(removedList);
+      setExpiredJoined(expiredList);
+      setPastJoined(pastList);
+    } catch {
+      setConfirmedJoined([]);
+      setPendingJoined([]);
+      setDeclinedJoined([]);
+      setRemovedJoined([]);
+      setExpiredJoined([]);
+      setPastJoined([]);
+    }
+  }, []);
+
+  const incrementGamesPlayed = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem("userProfile");
+      const profile = raw ? JSON.parse(raw) : {};
+      const current = profile.gamesPlayed || 0;
+      const updated = { ...profile, gamesPlayed: current + 1 };
+      await AsyncStorage.setItem("userProfile", JSON.stringify(updated));
+      console.log("Games played updated to:", current + 1);
+    } catch (e) {
+      console.log("incrementGamesPlayed error:", e);
+    }
+  }, []);
+
+  const updateRequestStatus = useCallback(
+    async (eventId: number, status: MemberStatus, attended: boolean) => {
+      const requestsRaw = await AsyncStorage.getItem(EVENT_REQUESTS_KEY);
+      const requests = requestsRaw
+        ? (JSON.parse(requestsRaw) as EventRequest[])
+        : [];
+      const updated = requests.map((r) =>
+        r.eventId === eventId && r.userId === CURRENT_USER_ID
+          ? {
+              ...r,
+              status,
+              attended,
+              attendanceAnswered: true,
+            }
+          : r
+      );
+      await AsyncStorage.setItem(EVENT_REQUESTS_KEY, JSON.stringify(updated));
+    },
+    []
+  );
+
+  const removeRequest = useCallback(async (eventId: number) => {
+    await cancelJoinRequest(eventId);
+  }, []);
+
+  const updateMyEventStatus = useCallback(
+    async (eventId: number, attended: boolean) => {
+      const myEventsRaw = await AsyncStorage.getItem(MY_EVENTS_KEY);
+      const stored = myEventsRaw ? (JSON.parse(myEventsRaw) as PlazaEvent[]) : [];
+      const updated = stored.map((e) =>
+        e.id === eventId
+          ? {
+              ...e,
+              status: "past",
+              attended,
+              attendanceAnswered: true,
+            }
+          : e
+      );
+      await AsyncStorage.setItem(MY_EVENTS_KEY, JSON.stringify(updated));
+      setMyEvents(updated);
+    },
+    []
+  );
+
+  const removeMyEvent = useCallback(async (eventId: number) => {
+    const myEventsRaw = await AsyncStorage.getItem(MY_EVENTS_KEY);
+    const stored = myEventsRaw ? (JSON.parse(myEventsRaw) as PlazaEvent[]) : [];
+    const updated = stored.filter((e) => e.id !== eventId);
+    await AsyncStorage.setItem(MY_EVENTS_KEY, JSON.stringify(updated));
+    setMyEvents(updated);
+  }, []);
+
+  const checkExpiredEventsRef = useRef<(() => Promise<void>) | null>(null);
+
+  const checkExpiredEvents = useCallback(async () => {
+    const requestsRaw = await AsyncStorage.getItem(EVENT_REQUESTS_KEY);
+    const requests = requestsRaw
+      ? (JSON.parse(requestsRaw) as EventRequest[])
+      : [];
+
+    const expiredConfirmed = requests.filter((r) => {
+      if (r.status !== "confirmed" || r.userId !== CURRENT_USER_ID) return false;
+      if (r.attendanceAnswered) return false;
+      return isEventExpired(r.eventData as { time?: string } | undefined);
+    });
+
+    const myEventsRaw = await AsyncStorage.getItem(MY_EVENTS_KEY);
+    const storedMyEvents = myEventsRaw
+      ? (JSON.parse(myEventsRaw) as PlazaEvent[])
+      : [];
+    const expiredMyEvents = storedMyEvents.filter((e) => {
+      if (e.attendanceAnswered) return false;
+      return isEventExpired(e);
+    });
+
+    if (expiredConfirmed.length > 0) {
+      const req = expiredConfirmed[0];
+      const title =
+        (req.eventData as { title?: string } | undefined)?.title ?? "Event";
+      Alert.alert(
+        "Did you attend?",
+        `"${title}" has passed. Did you show up?`,
+        [
+          {
+            text: "Yes! 🎉",
+            onPress: () => {
+              void (async () => {
+                await updateRequestStatus(req.eventId, "past", true);
+                await incrementGamesPlayed();
+                await loadJoinedRequests();
+                await loadStorage();
+                await checkExpiredEventsRef.current?.();
+              })();
+            },
+          },
+          {
+            text: "No",
+            onPress: () => {
+              void (async () => {
+                await removeRequest(req.eventId);
+                await loadJoinedRequests();
+                await loadStorage();
+                await checkExpiredEventsRef.current?.();
+              })();
+            },
+          },
+        ],
+        { cancelable: false }
+      );
+      return;
+    }
+
+    if (expiredMyEvents.length > 0) {
+      const ev = expiredMyEvents[0];
+      Alert.alert(
+        "Did your event happen?",
+        `"${ev.title}" has passed. Did you successfully host it?`,
+        [
+          {
+            text: "Yes! 🎉",
+            onPress: () => {
+              void (async () => {
+                await updateMyEventStatus(ev.id, true);
+                await incrementGamesPlayed();
+                await loadStorage();
+                await checkExpiredEventsRef.current?.();
+              })();
+            },
+          },
+          {
+            text: "No",
+            onPress: () => {
+              void (async () => {
+                await removeMyEvent(ev.id);
+                await loadStorage();
+                await checkExpiredEventsRef.current?.();
+              })();
+            },
+          },
+        ],
+        { cancelable: false }
+      );
+    }
+  }, [
+    incrementGamesPlayed,
+    loadJoinedRequests,
+    loadStorage,
+    removeMyEvent,
+    removeRequest,
+    updateMyEventStatus,
+    updateRequestStatus,
+  ]);
+
+  checkExpiredEventsRef.current = checkExpiredEvents;
+
   useFocusEffect(
     useCallback(() => {
       void loadStorage();
-    }, [loadStorage])
+      void loadJoinedRequests();
+      void checkExpiredEvents();
+
+      const loadBadges = async () => {
+        const pending = await getPendingRequestsCount();
+        const status = await getJoinedStatusChangesCount();
+        setMyEventsBadge(pending);
+        setJoinedBadge(status);
+      };
+      void loadBadges();
+    }, [loadStorage, loadJoinedRequests, checkExpiredEvents])
   );
+
+  useEffect(() => {
+    void checkExpiredEvents();
+    const interval = setInterval(() => {
+      void checkExpiredEvents();
+    }, 60 * 1000);
+    return () => clearInterval(interval);
+  }, [checkExpiredEvents]);
+
+  const switchSubTab = useCallback((tab: SubTab) => {
+    setSubTab(tab);
+    if (tab === "my") {
+      void clearPendingRequests();
+      setMyEventsBadge(0);
+    } else if (tab === "joined") {
+      void clearJoinedStatusChanges();
+      setJoinedBadge(0);
+    }
+  }, []);
 
   const getRequestStatus = useCallback(
     (eventId: number): MemberStatus =>
@@ -810,6 +1375,9 @@ export default function ExploreScreen() {
 
   const filteredDiscover = useMemo(() => {
     let list = [...allDiscoverEvents];
+
+    list = list.filter((event) => !isEventExpired(event));
+
     const sport = sportFromFilterLabel(selectedSport);
     if (sport) {
       list = list.filter((e) => e.sport === sport);
@@ -825,15 +1393,6 @@ export default function ExploreScreen() {
     }
     return list;
   }, [allDiscoverEvents, selectedSport, sortBy]);
-
-  const joinedEvents = useMemo(
-    () =>
-      allDiscoverEvents.filter(
-        (e) =>
-          !e.createdByMe && getRequestStatus(e.id) === "confirmed"
-      ),
-    [allDiscoverEvents, getRequestStatus]
-  );
 
   const fetchLocationSuggestions = async (input: string) => {
     if (input.length < 3) {
@@ -921,10 +1480,10 @@ export default function ExploreScreen() {
     }
 
     const maxSpots = Math.max(2, parseInt(formMax, 10) || 8);
-    const eventDate = date ?? new Date();
-    const eventTime = time ?? new Date();
-    const dateStr = formatDate(eventDate);
-    const timeStr = formatTime(eventTime);
+    const selectedDate = date ?? new Date();
+    const selectedTime = time ?? new Date();
+    const dateStr = formatDate(selectedDate);
+    const timeStr = formatTime(selectedTime);
 
     if (editingEvent) {
       const updated: PlazaEvent = {
@@ -958,7 +1517,14 @@ export default function ExploreScreen() {
       title: formName.trim(),
       location: location.trim(),
       distance: "0.1 mi",
-      time: `${dateStr}, ${timeStr}`,
+      time: new Date(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        selectedDate.getDate(),
+        selectedTime.getHours(),
+        selectedTime.getMinutes(),
+        0
+      ).toISOString(),
       postedAgo: "Just now",
       spots: 1,
       maxSpots,
@@ -972,7 +1538,6 @@ export default function ExploreScreen() {
     };
 
     await persistMyEvents([newEvent, ...myEvents]);
-    await seedDemoPendingForEvent(newEvent.id);
     await refreshRequestData();
     closeModal();
     setSubTab("my");
@@ -1092,9 +1657,84 @@ export default function ExploreScreen() {
     setEventRequestsList(requests);
     setPendingMap(pending);
     setEventMembersMap(members);
+    await loadJoinedRequests();
   };
 
+  const handleCancelJoinedRequest = async (eventId: number) => {
+    await cancelJoinRequest(eventId);
+    await refreshRequestData();
+  };
+
+  const handleRequestAgain = async (req: EventRequest) => {
+    const user = await getCurrentUser();
+    await submitJoinRequest(
+      req.eventId,
+      {
+        name: user.name,
+        initial: user.initial,
+        userId: CURRENT_USER_ID,
+      },
+      req.eventData
+    );
+    await refreshRequestData();
+  };
+
+  const handleRemoveDeclinedRequest = async (eventId: number) => {
+    await cancelJoinRequest(eventId);
+    await refreshRequestData();
+  };
+
+  const handleDismiss = useCallback(
+    async (eventId: number, status: string) => {
+      const raw = await AsyncStorage.getItem(EVENT_REQUESTS_KEY);
+      const requests = raw ? (JSON.parse(raw) as EventRequest[]) : [];
+      const updated = requests.filter((r) => {
+        if (r.eventId !== eventId || r.userId !== CURRENT_USER_ID) return true;
+        if (status === "expired") return r.status !== "pending";
+        return r.status !== status;
+      });
+      await AsyncStorage.setItem(EVENT_REQUESTS_KEY, JSON.stringify(updated));
+      await loadJoinedRequests();
+      await refreshRequestData();
+    },
+    [loadJoinedRequests]
+  );
+
+  const handleRequestAgainById = useCallback(
+    async (eventId: number) => {
+      const req = eventRequestsList.find(
+        (r) => r.eventId === eventId && r.userId === CURRENT_USER_ID
+      );
+      if (req) await handleRequestAgain(req);
+    },
+    [eventRequestsList, handleRequestAgain]
+  );
+
   const handleApproveRequest = async (eventId: number, userId: string) => {
+    const membersRaw = await AsyncStorage.getItem(EVENT_MEMBERS_KEY);
+    const allMembers = membersRaw
+      ? (JSON.parse(membersRaw) as EventRequestsByEvent)
+      : {};
+    const key = String(eventId);
+    const confirmedMembers = allMembers[key] ?? [];
+
+    const event =
+      allDiscoverEvents.find((e) => e.id === eventId) ??
+      myEvents.find((e) => e.id === eventId) ??
+      requestsModalEvent;
+    if (!event) return;
+
+    const confirmedCount = confirmedMembers.length + 1;
+
+    if (confirmedCount >= event.maxSpots) {
+      Alert.alert(
+        "Event Full",
+        "This event has reached maximum capacity. You cannot approve more members.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
+
     await approveJoinRequest(eventId, userId);
     await refreshRequestData();
 
@@ -1142,6 +1782,10 @@ export default function ExploreScreen() {
         requestsModalEvent.id
       ).length
     : 0;
+
+  const modalEventFull =
+    requestsModalEvent != null &&
+    modalConfirmedCount >= requestsModalEvent.maxSpots;
 
   const handleUnjoin = async (eventId: number) => {
     await leaveEvent(eventId);
@@ -1238,18 +1882,10 @@ export default function ExploreScreen() {
   );
 
   const renderMyEvents = () => {
-    if (myEvents.length === 0) {
-      return (
-        <View style={styles.emptyWrap}>
-          <Text style={styles.emptyIcon}>📋</Text>
-          <Text style={styles.emptyTitle}>No events yet</Text>
-          <Text style={styles.emptySubtitle}>Create your first event!</Text>
-          <Pressable style={styles.emptyBtn} onPress={openCreateModal}>
-            <Text style={styles.emptyBtnText}>Create Event</Text>
-          </Pressable>
-        </View>
-      );
-    }
+    const activeMyEvents = myEvents.filter((e) => e.status !== "past");
+    const pastMyEvents = myEvents.filter(
+      (e) => e.status === "past" && e.attended === true
+    );
 
     return (
       <ScrollView
@@ -1257,71 +1893,215 @@ export default function ExploreScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
       >
-        {myEvents.map((event) => {
-          const merged =
-            allDiscoverEvents.find((e) => e.id === event.id) ?? event;
-          const confirmedCount = buildConfirmedMembersList(
-            merged,
-            eventMembersMap,
-            merged.id
-          ).length;
-          return (
-            <EventCard
-              key={event.id}
-              event={merged}
-              mode="my"
-              joined={joinedIds.includes(event.id)}
-              liked={likedIds.has(event.id)}
-              onToggleLike={() => toggleLike(event.id)}
-              onJoin={() => {}}
-              onUnjoin={() => {}}
-              onCardPress={() => openEventDetails(merged)}
-              pendingRequestCount={getPendingForEvent(pendingMap, merged.id).length}
-              showGroupChat={confirmedCount >= 2}
-              onOpenGroupChat={() => openGroupChat(merged)}
-              onManageRequests={() => setRequestsModalEvent(merged)}
-              onEdit={() => openEditModal(merged)}
-              onDelete={() => handleDelete(merged)}
-            />
-          );
-        })}
+        <CollapsibleSection
+          title="📌 Active"
+          count={activeMyEvents.length}
+          defaultExpanded
+          showWhenEmpty
+        >
+          {activeMyEvents.length === 0 ? (
+            <View style={styles.myEventsActiveEmpty}>
+              <Text style={styles.myEventsActiveEmptyText}>No active events</Text>
+            </View>
+          ) : (
+            activeMyEvents.map((event) => {
+              const merged =
+                allDiscoverEvents.find((e) => e.id === event.id) ?? event;
+              const confirmedCount = buildConfirmedMembersList(
+                merged,
+                eventMembersMap,
+                merged.id
+              ).length;
+              return (
+                <EventCard
+                  key={event.id}
+                  event={merged}
+                  mode="my"
+                  joined={joinedIds.includes(event.id)}
+                  liked={likedIds.has(event.id)}
+                  onToggleLike={() => toggleLike(event.id)}
+                  onJoin={() => {}}
+                  onUnjoin={() => {}}
+                  onCardPress={() => openEventDetails(merged)}
+                  pendingRequestCount={
+                    getPendingForEvent(pendingMap, merged.id).length
+                  }
+                  showGroupChat={confirmedCount >= 2}
+                  onOpenGroupChat={() => openGroupChat(merged)}
+                  onManageRequests={() => setRequestsModalEvent(merged)}
+                  onEdit={() => openEditModal(merged)}
+                  onDelete={() => handleDelete(merged)}
+                />
+              );
+            })
+          )}
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="📅 Past"
+          count={pastMyEvents.length}
+          defaultExpanded={false}
+          showWhenEmpty
+        >
+          {pastMyEvents.map((event) => {
+            const merged =
+              allDiscoverEvents.find((e) => e.id === event.id) ?? event;
+            return (
+              <PastEventCard
+                key={`past-my-${event.id}`}
+                event={merged}
+                badge="✅ Hosted · +1 Game"
+                badgeColor="#dcfce7"
+                badgeTextColor={ACCENT_DARK}
+                onPress={() => openEventDetails(merged)}
+              />
+            );
+          })}
+        </CollapsibleSection>
       </ScrollView>
     );
   };
 
   const renderJoined = () => {
-    if (joinedEvents.length === 0) {
-      return (
-        <View style={styles.emptyWrap}>
-          <Text style={styles.emptyIcon}>✅</Text>
-          <Text style={styles.emptyTitle}>No joined events yet</Text>
-          <Text style={styles.emptySubtitle}>Discover events near you!</Text>
-          <Pressable style={styles.emptyBtn} onPress={() => setSubTab("discover")}>
-            <Text style={styles.emptyBtnText}>Explore Events</Text>
-          </Pressable>
-        </View>
-      );
-    }
-
     return (
       <ScrollView
         style={styles.tabScroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
       >
-        {joinedEvents.map((event) => (
-          <EventCard
-            key={event.id}
-            event={event}
-            mode="joined"
-            joined
-            liked={likedIds.has(event.id)}
-            onToggleLike={() => toggleLike(event.id)}
-            onJoin={() => {}}
-            onCardPress={() => openEventDetails(event, true)}
-            onUnjoin={() => {}}
-          />
-        ))}
+        <CollapsibleSection
+          title="✅ Confirmed"
+          count={confirmedJoined.length}
+          defaultExpanded
+          showWhenEmpty
+        >
+          {confirmedJoined.map((req) => {
+            const event = resolvePlazaEventFromRequest(req, allDiscoverEvents);
+            if (!event) return null;
+            return (
+              <View key={`confirmed-${req.eventId}`} style={styles.joinedAccentGreen}>
+                <EventCard
+                  event={event}
+                  mode="joined"
+                  joined
+                  liked={likedIds.has(event.id)}
+                  onToggleLike={() => toggleLike(event.id)}
+                  onJoin={() => {}}
+                  onCardPress={() => openEventDetails(event, true)}
+                  onUnjoin={() => {}}
+                />
+              </View>
+            );
+          })}
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="⏳ Pending"
+          count={pendingJoined.length}
+          defaultExpanded={false}
+          showWhenEmpty
+        >
+          {pendingJoined.map((req) => {
+            const event = resolvePlazaEventFromRequest(req, allDiscoverEvents);
+            if (!event) return null;
+            return (
+              <JoinedStatusCard
+                key={`pending-${req.eventId}`}
+                event={event}
+                variant="pending"
+                onCardPress={() => openEventDetails(event)}
+                onCancel={() => void handleCancelJoinedRequest(req.eventId)}
+              />
+            );
+          })}
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="📅 Past"
+          count={pastJoined.length}
+          defaultExpanded={false}
+          showWhenEmpty
+        >
+          {pastJoined.map((req) => {
+            const event = resolvePlazaEventFromRequest(req, allDiscoverEvents);
+            if (!event) return null;
+            return (
+              <PastEventCard
+                key={`past-joined-${req.eventId}`}
+                event={event}
+                badge="✅ Attended · +1 Game"
+                badgeColor="#dcfce7"
+                badgeTextColor={ACCENT_DARK}
+                onPress={() => openEventDetails(event, true)}
+              />
+            );
+          })}
+        </CollapsibleSection>
+
+        {removedJoined.length > 0 ? (
+          <View style={styles.staticSection}>
+            <Text style={styles.staticSectionLabel}>🚫 Removed</Text>
+            {removedJoined.map((req) => {
+              const event = resolvePlazaEventFromRequest(req, allDiscoverEvents);
+              if (!event) return null;
+              return (
+                <DismissableCard
+                  key={`removed-${req.eventId}`}
+                  event={event}
+                  badge="🚫 You've been removed"
+                  badgeColor="#fee2e2"
+                  badgeTextColor="#dc2626"
+                  onCardPress={() => openEventDetails(event)}
+                  onDismiss={() => void handleDismiss(req.eventId, "removed")}
+                />
+              );
+            })}
+          </View>
+        ) : null}
+
+        {expiredJoined.length > 0 ? (
+          <View style={styles.staticSection}>
+            <Text style={styles.staticSectionLabel}>⏰ Expired</Text>
+            {expiredJoined.map((req) => {
+              const event = resolvePlazaEventFromRequest(req, allDiscoverEvents);
+              if (!event) return null;
+              return (
+                <DismissableCard
+                  key={`expired-${req.eventId}`}
+                  event={event}
+                  badge="⏰ This event has passed"
+                  badgeColor="#f1f5f9"
+                  badgeTextColor={MUTED}
+                  onCardPress={() => openEventDetails(event)}
+                  onDismiss={() => void handleDismiss(req.eventId, "expired")}
+                />
+              );
+            })}
+          </View>
+        ) : null}
+
+        {declinedJoined.length > 0 ? (
+          <View style={styles.staticSection}>
+            <Text style={styles.staticSectionLabel}>❌ Declined</Text>
+            {declinedJoined.map((req) => {
+              const event = resolvePlazaEventFromRequest(req, allDiscoverEvents);
+              if (!event) return null;
+              return (
+                <DismissableCard
+                  key={`declined-${req.eventId}`}
+                  event={event}
+                  badge="❌ Request Declined"
+                  badgeColor="#fee2e2"
+                  badgeTextColor="#dc2626"
+                  onCardPress={() => openEventDetails(event)}
+                  showRequestAgain
+                  onRequestAgain={() => void handleRequestAgainById(req.eventId)}
+                  onDismiss={() => void handleDismiss(req.eventId, "rejected")}
+                />
+              );
+            })}
+          </View>
+        ) : null}
       </ScrollView>
     );
   };
@@ -1347,12 +2127,24 @@ export default function ExploreScreen() {
           return (
             <Pressable
               key={tab.key}
-              onPress={() => setSubTab(tab.key)}
+              onPress={() => switchSubTab(tab.key)}
               style={styles.subTabBtn}
             >
-              <Text style={[styles.subTabText, active && styles.subTabTextActive]}>
-                {tab.label}
-              </Text>
+              <View style={styles.subTabLabelRow}>
+                <Text style={[styles.subTabText, active && styles.subTabTextActive]}>
+                  {tab.label}
+                </Text>
+                {tab.key === "my" && myEventsBadge > 0 ? (
+                  <View style={styles.subTabBadge}>
+                    <Text style={styles.subTabBadgeText}>{myEventsBadge}</Text>
+                  </View>
+                ) : null}
+                {tab.key === "joined" && joinedBadge > 0 ? (
+                  <View style={styles.subTabBadge}>
+                    <Text style={styles.subTabBadgeText}>{joinedBadge}</Text>
+                  </View>
+                ) : null}
+              </View>
               {active ? <View style={styles.subTabUnderline} /> : null}
             </Pressable>
           );
@@ -1436,7 +2228,14 @@ export default function ExploreScreen() {
                 <Ionicons name="close" size={28} color={TEXT} />
               </Pressable>
             </View>
-            {modalPendingRequests.length > 0 ? (
+            {modalEventFull ? (
+              <View style={styles.requestsModalFullBanner}>
+                <Text style={styles.requestsModalFullBannerText}>
+                  ❌ Event is at full capacity. Cannot approve more members.
+                </Text>
+              </View>
+            ) : null}
+            {modalPendingRequests.length > 0 && !modalEventFull ? (
               <Text style={styles.requestsModalHint}>
                 Approve at least 1 person to unlock group chat (you + 1 member).
               </Text>
@@ -1463,9 +2262,13 @@ export default function ExploreScreen() {
                     </View>
                     <View style={styles.requestActions}>
                       <Pressable
-                        style={styles.approveBtn}
+                        style={[
+                          styles.approveBtn,
+                          modalEventFull && styles.approveBtnDisabled,
+                        ]}
+                        disabled={modalEventFull}
                         onPress={() => {
-                          if (requestsModalEvent) {
+                          if (requestsModalEvent && !modalEventFull) {
                             void handleApproveRequest(
                               requestsModalEvent.id,
                               req.userId
@@ -1473,7 +2276,14 @@ export default function ExploreScreen() {
                           }
                         }}
                       >
-                        <Text style={styles.approveBtnText}>Approve ✓</Text>
+                        <Text
+                          style={[
+                            styles.approveBtnText,
+                            modalEventFull && styles.approveBtnTextDisabled,
+                          ]}
+                        >
+                          {modalEventFull ? "Event Full" : "Approve ✓"}
+                        </Text>
                       </Pressable>
                       <Pressable
                         style={styles.declineBtn}
@@ -1776,6 +2586,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 12,
   },
+  subTabLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  subTabBadge: {
+    backgroundColor: "#dc2626",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  subTabBadgeText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
   subTabText: {
     fontSize: 15,
     fontWeight: "600",
@@ -1908,6 +2737,244 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
     gap: 14,
   },
+  collapsibleSection: {
+    marginBottom: 8,
+  },
+  collapsibleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: WHITE,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  collapsibleHeaderExpanded: {
+    marginBottom: 8,
+  },
+  collapsibleTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: TEXT,
+  },
+  collapsibleBody: {
+    gap: 8,
+  },
+  collapsibleEmpty: {
+    padding: 16,
+    alignItems: "center",
+    backgroundColor: WHITE,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  collapsibleEmptyText: {
+    color: PLACEHOLDER,
+    fontSize: 14,
+    fontStyle: "italic",
+  },
+  myEventsActiveEmpty: {
+    padding: 16,
+    alignItems: "center",
+    gap: 12,
+  },
+  myEventsActiveEmptyText: {
+    color: PLACEHOLDER,
+    fontSize: 14,
+    fontStyle: "italic",
+  },
+  staticSection: {
+    marginBottom: 8,
+    gap: 8,
+  },
+  staticSectionLabel: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: TEXT,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  dismissableCard: {
+    opacity: 0.85,
+    marginVertical: 2,
+  },
+  joinedSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    gap: 8,
+  },
+  joinedSectionTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0f172a",
+  },
+  joinedAccentGreen: {
+    borderLeftWidth: 4,
+    borderLeftColor: "#15803d",
+    borderRadius: 16,
+    overflow: "hidden",
+  },
+  joinedAccentYellow: {
+    borderLeftWidth: 4,
+    borderLeftColor: "#f59e0b",
+  },
+  joinedAccentRed: {
+    borderLeftWidth: 4,
+    borderLeftColor: "#dc2626",
+  },
+  joinedAccentExpired: {
+    borderLeftWidth: 4,
+    borderLeftColor: "#94a3b8",
+  },
+  joinedStatusCard: {
+    backgroundColor: WHITE,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+    gap: 6,
+    ...Platform.select({
+      ios: {
+        shadowColor: TEXT,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+      },
+      android: { elevation: 3 },
+      default: {},
+    }),
+  },
+  joinedStatusCardDimmed: {
+    opacity: 0.7,
+  },
+  joinedStatusCardRemoved: {
+    opacity: 0.6,
+  },
+  joinedStatusCardExpired: {
+    opacity: 0.6,
+  },
+  joinedStatusTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: TEXT,
+  },
+  joinedStatusMeta: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: MUTED,
+  },
+  joinedBadgePending: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+    backgroundColor: "#fef9c3",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  joinedBadgePendingText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#ca8a04",
+  },
+  joinedBadgeDeclined: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+    backgroundColor: "#fee2e2",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  joinedBadgeDeclinedText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#dc2626",
+  },
+  joinedBadgeRemoved: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+    backgroundColor: "#fee2e2",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  joinedBadgeRemovedText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#dc2626",
+  },
+  joinedBadgeExpired: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    backgroundColor: "#f1f5f9",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  joinedBadgeExpiredText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: MUTED,
+  },
+  pastEventCard: {
+    opacity: 0.8,
+    marginVertical: 6,
+  },
+  pastEventBadge: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  pastEventBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  pastBadgeAttended: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    backgroundColor: "#dcfce7",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  pastBadgeAttendedText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: ACCENT_DARK,
+  },
+  pastBadgeMissed: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    backgroundColor: "#f1f5f9",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  pastBadgeMissedText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: MUTED,
+  },
+  joinedCardActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    gap: 16,
+    marginTop: 8,
+  },
+  joinedTextBtnGreen: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: ACCENT_DARK,
+  },
+  joinedTextBtnGray: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: MUTED,
+  },
   eventCard: {
     backgroundColor: WHITE,
     borderRadius: 16,
@@ -2037,6 +3104,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
+  requestsModalFullBanner: {
+    backgroundColor: "#fee2e2",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  requestsModalFullBannerText: {
+    color: "#dc2626",
+    fontWeight: "700",
+    textAlign: "center",
+  },
   requestsModalHint: {
     fontSize: 13,
     color: MUTED,
@@ -2152,10 +3230,16 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
   },
+  approveBtnDisabled: {
+    backgroundColor: "#e2e8f0",
+  },
   approveBtnText: {
     color: WHITE,
     fontSize: 11,
     fontWeight: "800",
+  },
+  approveBtnTextDisabled: {
+    color: "#94a3b8",
   },
   declineBtn: {
     backgroundColor: "#fef2f2",

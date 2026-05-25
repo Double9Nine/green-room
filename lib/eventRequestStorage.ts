@@ -1,8 +1,17 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { getCurrentUser as loadCurrentUserProfile } from "./getCurrentUser";
+import {
+  incrementJoinedStatusChanges,
+} from "./notificationStore";
 
-export type MemberStatus = "none" | "pending" | "confirmed" | "rejected";
+export type MemberStatus =
+  | "none"
+  | "pending"
+  | "confirmed"
+  | "rejected"
+  | "removed"
+  | "past";
 
 export type EventRequest = {
   eventId: number;
@@ -11,6 +20,10 @@ export type EventRequest = {
   userInitial: string;
   status: MemberStatus;
   requestedAt: number;
+  /** Full event snapshot saved when the user requests to join. */
+  eventData?: Record<string, unknown>;
+  attended?: boolean;
+  attendanceAnswered?: boolean;
 };
 
 export const EVENT_REQUESTS_KEY = "eventRequests";
@@ -94,7 +107,8 @@ export function getMyStatusFromList(
 
 export async function submitJoinRequest(
   eventId: number,
-  user: { name: string; initial: string; userId: string }
+  user: { name: string; initial: string; userId: string },
+  eventData?: Record<string, unknown>
 ): Promise<void> {
   const request: EventRequest = {
     eventId,
@@ -103,6 +117,7 @@ export async function submitJoinRequest(
     userInitial: user.initial,
     status: "pending",
     requestedAt: Date.now(),
+    ...(eventData ? { eventData } : {}),
   };
 
   const requests = await loadEventRequests();
@@ -184,6 +199,10 @@ export async function approveJoinRequest(
     updated.push(confirmed);
   }
   await saveEventRequests(updated);
+
+  if (userId === CURRENT_USER_ID) {
+    await incrementJoinedStatusChanges();
+  }
 }
 
 export async function declineJoinRequest(
@@ -205,6 +224,10 @@ export async function declineJoinRequest(
         : r
     )
   );
+
+  if (userId === CURRENT_USER_ID) {
+    await incrementJoinedStatusChanges();
+  }
 }
 
 export async function leaveEvent(eventId: number): Promise<void> {
@@ -490,11 +513,6 @@ const DEMO_CONFIRMED_BY_EVENT: Record<number, DemoMemberDef[]> = {
   ],
 };
 
-const DEMO_PENDING_FOR_HOST: DemoMemberDef[] = [
-  { userId: "demo-pending-taylor", userName: "Taylor B.", userInitial: "T" },
-  { userId: "demo-pending-jordan", userName: "Jordan W.", userInitial: "J" },
-];
-
 function confirmedRequest(
   eventId: number,
   def: DemoMemberDef,
@@ -506,21 +524,6 @@ function confirmedRequest(
     userName: def.userName,
     userInitial: def.userInitial,
     status: "confirmed",
-    requestedAt,
-  };
-}
-
-function pendingRequest(
-  eventId: number,
-  def: DemoMemberDef,
-  requestedAt: number
-): EventRequest {
-  return {
-    eventId,
-    userId: def.userId,
-    userName: def.userName,
-    userInitial: def.userInitial,
-    status: "pending",
     requestedAt,
   };
 }
@@ -549,61 +552,8 @@ function mergeDemoMembers(
   return [...kept, ...seeded];
 }
 
-const DEMO_PENDING_SEEDED_KEY = "demoPendingSeededEventIds";
-
-async function loadDemoPendingSeededIds(): Promise<number[]> {
-  try {
-    const raw = await AsyncStorage.getItem(DEMO_PENDING_SEEDED_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((id): id is number => typeof id === "number")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-async function markDemoPendingSeeded(eventId: number): Promise<void> {
-  const ids = await loadDemoPendingSeededIds();
-  if (ids.includes(eventId)) return;
-  await AsyncStorage.setItem(
-    DEMO_PENDING_SEEDED_KEY,
-    JSON.stringify([...ids, eventId])
-  );
-}
-
-/** Demo pending requests once per new event (create flow only). */
-export async function seedDemoPendingForEvent(eventId: number): Promise<void> {
-  const seededIds = await loadDemoPendingSeededIds();
-  if (seededIds.includes(eventId)) return;
-
-  const pending = await loadPendingRequests();
-  const key = String(eventId);
-  if ((pending[key] ?? []).some((r) => r.userId.startsWith("demo-pending"))) {
-    await markDemoPendingSeeded(eventId);
-    return;
-  }
-
-  let requests = await loadEventRequests();
-  const now = Date.now();
-  const pendingReqs = DEMO_PENDING_FOR_HOST.map((def, i) =>
-    pendingRequest(
-      eventId,
-      def,
-      now - (DEMO_PENDING_FOR_HOST.length - i) * 600000
-    )
-  );
-  for (const req of pendingReqs) {
-    requests = upsertRequest(requests, req);
-  }
-  await savePendingRequests({ ...pending, [key]: pendingReqs });
-  await saveEventRequests(requests);
-  await markDemoPendingSeeded(eventId);
-}
-
 /**
- * Seeds approved members (and sample pending requests) once so counts,
+ * Seeds approved demo members once so counts,
  * member list, and group chat stay in sync with the request system.
  */
 export async function ensureDemoEventSeed(): Promise<void> {

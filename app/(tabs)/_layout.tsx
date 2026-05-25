@@ -1,16 +1,46 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
+import { Tabs, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
 
-const BG = '#f0fdf4';
-const WHITE = '#ffffff';
-const TEXT = '#0f172a';
-const MUTED = '#64748b';
-const BORDER = '#e2e8f0';
-const ACCENT = '#22c55e';
-const ACCENT_DARK = '#15803d';
+import {
+  getExploreBadgeCount,
+  getUnreadGroupCount,
+  getUnreadPrivateCount,
+} from "@/lib/notificationStore";
+
+const BG = "#f0fdf4";
+const WHITE = "#ffffff";
+const TEXT = "#0f172a";
+const MUTED = "#64748b";
+const BORDER = "#e2e8f0";
+const ACCENT = "#22c55e";
+const ACCENT_DARK = "#15803d";
 
 export default function TabsLayout() {
+  const [exploreBadge, setExploreBadge] = useState(0);
+  const [chatBadge, setChatBadge] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      const loadBadges = async () => {
+        const explore = await getExploreBadgeCount();
+        const [priv, grp] = await Promise.all([
+          getUnreadPrivateCount(),
+          getUnreadGroupCount(),
+        ]);
+        const chat = priv + grp;
+        setExploreBadge(explore);
+        setChatBadge(chat);
+      };
+      void loadBadges();
+      const interval = setInterval(() => {
+        void loadBadges();
+      }, 3000);
+      return () => clearInterval(interval);
+    }, [])
+  );
+
   return (
     <Tabs
       screenOptions={{
@@ -66,6 +96,8 @@ export default function TabsLayout() {
         name="explore"
         options={{
           title: "Explore",
+          tabBarBadge: exploreBadge > 0 ? exploreBadge : undefined,
+          tabBarBadgeStyle: { backgroundColor: "#dc2626" },
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
               name={focused ? "compass" : "compass-outline"}
@@ -79,6 +111,8 @@ export default function TabsLayout() {
         name="chat"
         options={{
           title: "Chat",
+          tabBarBadge: chatBadge > 0 ? chatBadge : undefined,
+          tabBarBadgeStyle: { backgroundColor: "#dc2626" },
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
               name={focused ? "chatbubble" : "chatbubble-outline"}

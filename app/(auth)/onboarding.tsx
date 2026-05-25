@@ -1,6 +1,6 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
-import { useRef, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 import {
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -17,23 +17,26 @@ type SlideConfig = {
   icon: string;
   title: string;
   subtitle: string;
-  cta: string;
-  onPress: () => void;
+  cta?: string;
+  onPress?: () => void;
 };
 
 export default function OnboardingScreen() {
-  const [activeSlide, setActiveSlide] = useState(0);
+  const { startSlide } = useLocalSearchParams<{ startSlide?: string }>();
+  const [activeSlide, setActiveSlide] = useState(startSlide === "1" ? 1 : 0);
   const scrollRef = useRef<ScrollView>(null);
   const { width: screenWidth } = useWindowDimensions();
+
+  useEffect(() => {
+    if (startSlide === "1") {
+      scrollRef.current?.scrollTo({ x: screenWidth, animated: false });
+      setActiveSlide(1);
+    }
+  }, [screenWidth, startSlide]);
 
   const handleScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const page = Math.round(event.nativeEvent.contentOffset.x / screenWidth);
     setActiveSlide(page);
-  };
-
-  const goToSlideTwo = () => {
-    scrollRef.current?.scrollTo({ x: screenWidth, animated: true });
-    setActiveSlide(1);
   };
 
   const slides: SlideConfig[] = [
@@ -42,8 +45,6 @@ export default function OnboardingScreen() {
       icon: "🏃",
       title: "Welcome to Green Room",
       subtitle: "Find players. Book courts. Play.",
-      cta: "Get Started",
-      onPress: goToSlideTwo,
     },
     {
       id: 1,
@@ -95,12 +96,30 @@ function OnboardingSlide({ slide, screenWidth }: { slide: SlideConfig; screenWid
         <Text style={styles.title}>{slide.title}</Text>
         <Text style={styles.subtitle}>{slide.subtitle}</Text>
 
-        <Pressable
-          onPress={slide.onPress}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-        >
-          <Text style={styles.buttonText}>{slide.cta}</Text>
-        </Pressable>
+        {slide.id === 0 ? (
+          <View style={styles.authButtonColumn}>
+            <Pressable
+              onPress={() => router.push("/(auth)/signup")}
+              style={styles.createAccountBtn}
+            >
+              <Text style={styles.createAccountBtnText}>Create Account</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => router.push("/(auth)/login")}
+              style={styles.loginBtn}
+            >
+              <Text style={styles.loginBtnText}>Log In</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            onPress={slide.onPress}
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          >
+            <Text style={styles.buttonText}>{slide.cta}</Text>
+          </Pressable>
+        )}
       </View>
     </LinearGradient>
   );
@@ -157,6 +176,37 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 28,
     maxWidth: 320,
+  },
+  authButtonColumn: {
+    width: "100%",
+    gap: 12,
+    paddingHorizontal: 24,
+  },
+  createAccountBtn: {
+    backgroundColor: "#15803d",
+    borderRadius: 30,
+    paddingVertical: 16,
+    width: "100%",
+    alignItems: "center",
+  },
+  createAccountBtnText: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  loginBtn: {
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderColor: "#15803d",
+    borderRadius: 30,
+    paddingVertical: 16,
+    width: "100%",
+    alignItems: "center",
+  },
+  loginBtnText: {
+    color: "#15803d",
+    fontSize: 17,
+    fontWeight: "800",
   },
   button: {
     marginTop: 6,

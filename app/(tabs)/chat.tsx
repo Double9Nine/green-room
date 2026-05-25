@@ -22,11 +22,21 @@ import {
   type StoredConversation,
 } from "@/lib/conversationsStorage";
 import {
+  GROUP_CHAT_CONVERSATIONS_KEY,
   loadGroupChatConversations,
   type StoredGroupChatConversation,
 } from "@/lib/groupChatConversationsStorage";
+import {
+  clearUnreadGroup,
+  clearUnreadPrivate,
+  getUnreadGroupCount,
+  getUnreadPrivateCount,
+} from "@/lib/notificationStore";
+
+type ChatSubTab = "private" | "group";
 
 const MUTED_CONVERSATIONS_KEY = "mutedConversations";
+const MUTED_GROUP_CHATS_KEY = "mutedGroupChats";
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -55,10 +65,18 @@ function formatConversationTime(timestamp: number) {
 
 function GroupChatRow({
   convo,
+  isMuted,
   onPress,
+  swipeableRef,
+  onSwipeableWillOpen,
+  renderRightActions,
 }: {
   convo: StoredGroupChatConversation;
+  isMuted: boolean;
   onPress: () => void;
+  swipeableRef: (ref: Swipeable | null) => void;
+  onSwipeableWillOpen: () => void;
+  renderRightActions: () => ReactNode;
 }) {
   const scale = useRef(new Animated.Value(1)).current;
 
@@ -72,31 +90,51 @@ function GroupChatRow({
   };
 
   return (
-    <Animated.View style={[styles.convoCard, { transform: [{ scale }] }]}>
-      <Pressable
-        onPress={onPress}
-        onPressIn={() => animateScale(0.97)}
-        onPressOut={() => animateScale(1)}
-        style={styles.cardPressable}
+    <View style={styles.swipeRow}>
+      <Swipeable
+        ref={swipeableRef}
+        renderRightActions={renderRightActions}
+        friction={2}
+        rightThreshold={40}
+        overshootRight={false}
+        onSwipeableWillOpen={onSwipeableWillOpen}
       >
-        <View style={styles.groupChatAvatar}>
-          <Text style={styles.groupChatAvatarEmoji}>{convo.sportEmoji}</Text>
-        </View>
-        <View style={styles.convoBody}>
-          <View style={styles.convoTop}>
-            <Text style={styles.convoName} numberOfLines={1}>
-              {convo.eventTitle}
-            </Text>
-            <Text style={styles.convoTime}>
-              {formatConversationTime(convo.lastMessageTime)}
-            </Text>
-          </View>
-          <Text style={styles.convoPreview} numberOfLines={1}>
-            {convo.lastMessage}
-          </Text>
-        </View>
-      </Pressable>
-    </Animated.View>
+        <Animated.View style={[styles.convoCard, { transform: [{ scale }] }]}>
+          <Pressable
+            onPress={onPress}
+            onPressIn={() => animateScale(0.97)}
+            onPressOut={() => animateScale(1)}
+            style={styles.cardPressable}
+          >
+            <View style={styles.groupChatAvatar}>
+              <Text style={styles.groupChatAvatarEmoji}>{convo.sportEmoji}</Text>
+            </View>
+            <View style={styles.convoBody}>
+              <View style={styles.convoTop}>
+                <View style={styles.nameRow}>
+                  <Text style={styles.convoName} numberOfLines={1}>
+                    {convo.eventTitle}
+                  </Text>
+                  {isMuted ? (
+                    <Ionicons
+                      name="notifications-off-outline"
+                      size={16}
+                      color={MUTED}
+                    />
+                  ) : null}
+                </View>
+                <Text style={styles.convoTime}>
+                  {formatConversationTime(convo.lastMessageTime)}
+                </Text>
+              </View>
+              <Text style={styles.convoPreview} numberOfLines={1}>
+                {convo.lastMessage}
+              </Text>
+            </View>
+          </Pressable>
+        </Animated.View>
+      </Swipeable>
+    </View>
   );
 }
 
@@ -191,12 +229,18 @@ function ConversationRow({
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const [subTab, setSubTab] = useState<ChatSubTab>("private");
+  const [privateBadge, setPrivateBadge] = useState(0);
+  const [groupBadge, setGroupBadge] = useState(0);
   const [conversations, setConversations] = useState<StoredConversation[]>([]);
   const [groupChats, setGroupChats] = useState<StoredGroupChatConversation[]>(
     []
   );
   const [mutedIds, setMutedIds] = useState<string[]>([]);
+  const [mutedGroupIds, setMutedGroupIds] = useState<string[]>([]);
   const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
+  const subTabRef = useRef<ChatSubTab>("private");
+  subTabRef.current = subTab;
 
   const loadConversations = useCallback(async () => {
     const convos = await loadStoredConversations();
@@ -208,10 +252,38 @@ export default function ChatScreen() {
     setGroupChats(groups);
   }, []);
 
+  const refreshBadges = useCallback(async () => {
+    const [priv, grp] = await Promise.all([
+      getUnreadPrivateCount(),
+      getUnreadGroupCount(),
+    ]);
+    if (subTabRef.current === "private") {
+      await clearUnreadPrivate();
+      setPrivateBadge(0);
+      setGroupBadge(grp);
+    } else {
+      await clearUnreadGroup();
+      setGroupBadge(0);
+      setPrivateBadge(priv);
+    }
+  }, []);
+
+  const switchSubTab = useCallback(async (tab: ChatSubTab) => {
+    setSubTab(tab);
+    if (tab === "private") {
+      await clearUnreadPrivate();
+      setPrivateBadge(0);
+    } else {
+      await clearUnreadGroup();
+      setGroupBadge(0);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       void loadConversations();
       void loadGroupChats();
+      void refreshBadges();
 
       AsyncStorage.getItem(MUTED_CONVERSATIONS_KEY).then((val) => {
         if (val) {
@@ -225,7 +297,20 @@ export default function ChatScreen() {
           setMutedIds([]);
         }
       });
-    }, [loadConversations, loadGroupChats])
+
+      AsyncStorage.getItem(MUTED_GROUP_CHATS_KEY).then((val) => {
+        if (val) {
+          try {
+            const parsed = JSON.parse(val) as string[];
+            setMutedGroupIds(Array.isArray(parsed) ? parsed : []);
+          } catch {
+            setMutedGroupIds([]);
+          }
+        } else {
+          setMutedGroupIds([]);
+        }
+      });
+    }, [loadConversations, loadGroupChats, refreshBadges])
   );
 
   const closeAllSwipeables = useCallback(() => {
@@ -257,6 +342,7 @@ export default function ChatScreen() {
   };
 
   const openGroupChat = (convo: StoredGroupChatConversation) => {
+    closeAllSwipeables();
     router.push({
       pathname: "/event-group-chat",
       params: {
@@ -306,6 +392,77 @@ export default function ChatScreen() {
       ]
     );
   }, []);
+
+  const handleMuteGroupChat = useCallback(async (eventId: string) => {
+    swipeableRefs.current[`group-${eventId}`]?.close();
+    setMutedGroupIds((prev) => {
+      const next = prev.includes(eventId)
+        ? prev.filter((id) => id !== eventId)
+        : [...prev, eventId];
+      void AsyncStorage.setItem(MUTED_GROUP_CHATS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const handleDeleteGroupChat = useCallback((eventId: string) => {
+    swipeableRefs.current[`group-${eventId}`]?.close();
+    Alert.alert(
+      "Delete Group Chat",
+      "This will remove the group chat from your list.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setGroupChats((prev) => {
+                const updated = prev.filter((g) => g.eventId !== eventId);
+                void AsyncStorage.setItem(
+                  GROUP_CHAT_CONVERSATIONS_KEY,
+                  JSON.stringify(updated)
+                );
+                return updated;
+              });
+              delete swipeableRefs.current[`group-${eventId}`];
+            })();
+          },
+        },
+      ]
+    );
+  }, []);
+
+  const renderGroupChatRightActions = useCallback(
+    (eventId: string) => () => {
+      const isMuted = mutedGroupIds.includes(eventId);
+
+      return (
+        <View style={styles.actionsRow}>
+          <Pressable
+            style={isMuted ? styles.unmuteAction : styles.muteAction}
+            onPress={() => void handleMuteGroupChat(eventId)}
+          >
+            <Ionicons
+              name={
+                isMuted ? "notifications-outline" : "notifications-off-outline"
+              }
+              size={22}
+              color="#ffffff"
+            />
+            <Text style={styles.actionLabel}>{isMuted ? "Unmute" : "Mute"}</Text>
+          </Pressable>
+          <Pressable
+            style={styles.deleteAction}
+            onPress={() => handleDeleteGroupChat(eventId)}
+          >
+            <Ionicons name="trash-outline" size={22} color="#ffffff" />
+            <Text style={styles.actionLabel}>Delete</Text>
+          </Pressable>
+        </View>
+      );
+    },
+    [handleDeleteGroupChat, handleMuteGroupChat, mutedGroupIds]
+  );
 
   const renderRightActions = useCallback(
     (convo: StoredConversation) => () => {
@@ -359,49 +516,59 @@ export default function ChatScreen() {
 
         <View style={styles.titleUnderline} />
 
-        {groupChats.length === 0 && conversations.length === 0 ? (
-          <>
-            <View style={styles.card}>
-              <View style={styles.cardStripe} />
-              <Text style={styles.cardHeading}>No conversations yet</Text>
-              <Text style={styles.cardBody}>
-                Join or host an event to message organizers and your group, or
-                tap Match to find players.
-              </Text>
-            </View>
+        <View style={styles.subTabRow}>
+          {(
+            [
+              { key: "private" as const, label: "Private" },
+              { key: "group" as const, label: "Group" },
+            ] as const
+          ).map((tab) => {
+            const active = subTab === tab.key;
+            const badge = tab.key === "private" ? privateBadge : groupBadge;
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => void switchSubTab(tab.key)}
+                style={styles.subTabBtn}
+              >
+                <View style={styles.subTabLabelRow}>
+                  <Text
+                    style={[styles.subTabText, active && styles.subTabTextActive]}
+                  >
+                    {tab.label}
+                  </Text>
+                  {badge > 0 ? (
+                    <View style={styles.subTabBadge}>
+                      <Text style={styles.subTabBadgeText}>{badge}</Text>
+                    </View>
+                  ) : null}
+                </View>
+                {active ? <View style={styles.subTabUnderline} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
 
-            <View style={styles.hintPill}>
-              <Text style={styles.hintText}>
-                Tip: confirm time & court in chat
-              </Text>
-            </View>
-          </>
-        ) : (
-          <View style={styles.list}>
-            {groupChats.length > 0 ? (
+        <View style={styles.tabBody}>
+          {subTab === "private" ? (
+            conversations.length === 0 ? (
               <>
-                <Text style={styles.sectionHeading}>Group Chats</Text>
-                {groupChats.map((convo) => (
-                  <View key={convo.eventId} style={styles.swipeRow}>
-                    <GroupChatRow
-                      convo={convo}
-                      onPress={() => openGroupChat(convo)}
-                    />
-                  </View>
-                ))}
+                <View style={styles.card}>
+                  <View style={styles.cardStripe} />
+                  <Text style={styles.cardHeading}>No conversations yet</Text>
+                  <Text style={styles.cardBody}>
+                    Tap Match to find players and start a direct message, or
+                    message an event organizer from Event Plaza.
+                  </Text>
+                </View>
+                <View style={styles.hintPill}>
+                  <Text style={styles.hintText}>
+                    Tip: confirm time & court in chat
+                  </Text>
+                </View>
               </>
-            ) : null}
-
-            {conversations.length > 0 ? (
-              <>
-                <Text
-                  style={[
-                    styles.sectionHeading,
-                    groupChats.length > 0 && styles.sectionHeadingSpaced,
-                  ]}
-                >
-                  Direct Messages
-                </Text>
+            ) : (
+              <View style={styles.list}>
                 {conversations.map((convo) => (
                   <ConversationRow
                     key={convo.id}
@@ -415,10 +582,43 @@ export default function ChatScreen() {
                     onPress={() => openConversation(convo)}
                   />
                 ))}
-              </>
-            ) : null}
-          </View>
-        )}
+              </View>
+            )
+          ) : groupChats.length === 0 ? (
+            <>
+              <View style={styles.card}>
+                <View style={styles.cardStripe} />
+                <Text style={styles.cardHeading}>No group chats yet</Text>
+                <Text style={styles.cardBody}>
+                  Join or host an event to chat with your group in Event Plaza.
+                </Text>
+              </View>
+              <View style={styles.hintPill}>
+                <Text style={styles.hintText}>
+                  Tip: coordinate meetups in your event group chat
+                </Text>
+              </View>
+            </>
+          ) : (
+            <View style={styles.list}>
+              {groupChats.map((convo) => (
+                <GroupChatRow
+                  key={convo.eventId}
+                  convo={convo}
+                  isMuted={mutedGroupIds.includes(convo.eventId)}
+                  swipeableRef={(ref) => {
+                    swipeableRefs.current[`group-${convo.eventId}`] = ref;
+                  }}
+                  onSwipeableWillOpen={() =>
+                    closeOtherSwipeables(`group-${convo.eventId}`)
+                  }
+                  renderRightActions={renderGroupChatRightActions(convo.eventId)}
+                  onPress={() => openGroupChat(convo)}
+                />
+              ))}
+            </View>
+          )}
+        </View>
       </ScrollView>
     </GestureHandlerRootView>
   );
@@ -456,6 +656,59 @@ const styles = StyleSheet.create({
     width: 48,
     borderRadius: 2,
     backgroundColor: ACCENT,
+  },
+  subTabRow: {
+    alignSelf: "stretch",
+    width: "100%",
+    flexDirection: "row",
+    marginTop: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  subTabBtn: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  subTabLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  subTabBadge: {
+    backgroundColor: "#dc2626",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  subTabBadgeText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  subTabText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: MUTED,
+  },
+  subTabTextActive: {
+    color: ACCENT_DARK,
+    fontWeight: "800",
+  },
+  subTabUnderline: {
+    marginTop: 8,
+    height: 3,
+    width: "70%",
+    borderRadius: 2,
+    backgroundColor: ACCENT_DARK,
+  },
+  tabBody: {
+    alignSelf: "stretch",
+    width: "100%",
+    marginTop: 8,
   },
   card: {
     marginTop: 28,
@@ -515,19 +768,9 @@ const styles = StyleSheet.create({
     color: ACCENT_DARK,
   },
   list: {
-    marginTop: 24,
+    marginTop: 16,
     alignSelf: "stretch",
     width: "100%",
-  },
-  sectionHeading: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: ACCENT_DARK,
-    marginBottom: 8,
-    alignSelf: "flex-start",
-  },
-  sectionHeadingSpaced: {
-    marginTop: 20,
   },
   groupChatAvatar: {
     width: 48,

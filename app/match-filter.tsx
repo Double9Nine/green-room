@@ -48,6 +48,14 @@ const PURPOSE_OPTIONS = [
   "Something Else ✨",
 ] as const;
 
+const MATCH_LEVEL_OPTIONS = [
+  "Same level",
+  "±1 level",
+  "Any level",
+] as const;
+
+const MATCH_LEVEL_SPORT_IDS = ["tennis", "badminton", "pickleball", "golf"] as const;
+
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 const TIMES = ["Mor", "Aft", "Eve"];
 
@@ -203,6 +211,9 @@ export default function MatchFilterScreen() {
 
   const isGolf = selectedSport.id === "golf";
   const isRunning = selectedSport.id === "running";
+  const showMatchLevel = (
+    MATCH_LEVEL_SPORT_IDS as readonly string[]
+  ).includes(selectedSport.id);
 
   const [golfScene, setGolfScene] = useState("driving_range");
   const [runningScene, setRunningScene] = useState("easy");
@@ -225,6 +236,11 @@ export default function MatchFilterScreen() {
     setGolfScene("driving_range");
     setRunningScene("easy");
     setRunningUnit("mi");
+    setPurpose(
+      (MATCH_LEVEL_SPORT_IDS as readonly string[]).includes(selectedSport.id)
+        ? MATCH_LEVEL_OPTIONS[0]
+        : PURPOSE_OPTIONS[0]
+    );
   }, [selectedSport.id]);
 
   useEffect(() => {
@@ -621,7 +637,13 @@ export default function MatchFilterScreen() {
           </Picker>
         </View>
 
-        <Text style={styles.sectionTitle}>Purpose</Text>
+        {showMatchLevel ? (
+          <Text style={styles.sectionQuestion}>
+            What level would you like to play with?
+          </Text>
+        ) : (
+          <Text style={styles.sectionTitle}>Purpose</Text>
+        )}
         <View style={styles.sectionCard}>
           <Picker
             selectedValue={purpose}
@@ -629,9 +651,13 @@ export default function MatchFilterScreen() {
             style={styles.wheelPicker}
             itemStyle={styles.wheelPickerItem}
           >
-            {PURPOSE_OPTIONS.map((opt) => (
-              <Picker.Item key={opt} label={opt} value={opt} />
-            ))}
+            {showMatchLevel
+              ? MATCH_LEVEL_OPTIONS.map((opt) => (
+                  <Picker.Item key={opt} label={opt} value={opt} />
+                ))
+              : PURPOSE_OPTIONS.map((opt) => (
+                  <Picker.Item key={opt} label={opt} value={opt} />
+                ))}
           </Picker>
         </View>
       </ScrollView>
@@ -734,6 +760,13 @@ const styles = StyleSheet.create({
     color: ACCENT_DARK,
     textTransform: "uppercase",
     letterSpacing: 1,
+  },
+  sectionQuestion: {
+    marginTop: 0,
+    marginBottom: 8,
+    fontSize: 15,
+    fontWeight: "700",
+    color: CONTENT_TEXT,
   },
   sectionCard: {
     backgroundColor: WHITE,

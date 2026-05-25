@@ -15,6 +15,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { getMatchSport } from "@/constants/matchSports";
 
@@ -29,6 +30,13 @@ const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Player>);
 
 const GOLD = "#d4af37";
 const DARK_GREEN = "#052e16";
+
+const TABS = [
+  { name: "Match", icon: "tennisball-outline", route: "/(tabs)/match" },
+  { name: "Explore", icon: "compass-outline", route: "/(tabs)/explore" },
+  { name: "Chat", icon: "chatbubble-outline", route: "/(tabs)/chat" },
+  { name: "Profile", icon: "person-outline", route: "/(tabs)/profile" },
+] as const;
 const BG_GRADIENT = ["#052e16", "#14532d", "#166534"] as const;
 const CARD_GRADIENT = ["#064e3b", "#065f46", "#047857"] as const;
 
@@ -515,6 +523,7 @@ function AnimatedPlayerCard({
 
 export default function MatchResultsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     sport?: string;
     sportLabel?: string;
@@ -651,6 +660,7 @@ export default function MatchResultsScreen() {
                 contentContainerStyle={{
                   paddingHorizontal: SIDE_PADDING,
                   paddingVertical: 20,
+                  paddingBottom: 120,
                   alignItems: "center",
                 }}
                 ItemSeparatorComponent={() => (
@@ -672,6 +682,28 @@ export default function MatchResultsScreen() {
             </View>
           )}
         </View>
+
+        <View
+          style={[
+            styles.tabBar,
+            { paddingBottom: Math.max(insets.bottom, 16) },
+          ]}
+        >
+          {TABS.map((tab) => (
+            <Pressable
+              key={tab.name}
+              onPress={() => router.push(tab.route)}
+              style={styles.tabBarItem}
+            >
+              <Ionicons
+                name={tab.icon as keyof typeof Ionicons.glyphMap}
+                size={24}
+                color={GOLD}
+              />
+              <Text style={styles.tabBarLabel}>{tab.name}</Text>
+            </Pressable>
+          ))}
+        </View>
       </SparkleBackground>
     </>
   );
@@ -683,6 +715,28 @@ const styles = StyleSheet.create({
   },
   screenInner: {
     flex: 1,
+  },
+  tabBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: DARK_GREEN,
+    paddingTop: 12,
+    borderTopWidth: 0.5,
+    borderTopColor: "rgba(212,175,55,0.3)",
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+  },
+  tabBarItem: {
+    alignItems: "center",
+    gap: 4,
+  },
+  tabBarLabel: {
+    color: GOLD,
+    fontSize: 10,
+    fontWeight: "600",
   },
   headerBack: {
     flexDirection: "row",
@@ -717,7 +771,7 @@ const styles = StyleSheet.create({
   carouselWrap: {
     width,
     alignSelf: "center",
-    marginTop: 60,
+    marginTop: 40,
   },
   emptyWrap: {
     flex: 1,

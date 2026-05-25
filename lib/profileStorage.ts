@@ -20,6 +20,7 @@ export type UserProfile = {
   purpose: string;
   tags: string[];
   notifications: ProfileNotifications;
+  gamesPlayed?: number;
 };
 
 export const DEFAULT_USER_PROFILE: UserProfile = {
@@ -38,6 +39,7 @@ export const DEFAULT_USER_PROFILE: UserProfile = {
     newMessages: true,
     gameReminders: true,
   },
+  gamesPlayed: 0,
 };
 
 function migrateLegacy(raw: Record<string, unknown>): Partial<UserProfile> {
@@ -101,6 +103,10 @@ function mergeWithDefaults(parsed: Partial<UserProfile>): UserProfile {
       ...DEFAULT_USER_PROFILE.notifications,
       ...(parsed.notifications ?? {}),
     },
+    gamesPlayed:
+      typeof parsed.gamesPlayed === "number"
+        ? parsed.gamesPlayed
+        : DEFAULT_USER_PROFILE.gamesPlayed,
   };
 }
 

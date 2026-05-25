@@ -205,6 +205,18 @@ export default function ProfileScreen() {
   const [draftTags, setDraftTags] = useState<string[]>([]);
   const [draftLocation, setDraftLocation] = useState("");
   const [tagError, setTagError] = useState("");
+  const [gamesPlayed, setGamesPlayed] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      void AsyncStorage.getItem("userProfile").then((raw) => {
+        if (raw) {
+          const p = JSON.parse(raw) as { gamesPlayed?: number };
+          setGamesPlayed(p.gamesPlayed || 0);
+        }
+      });
+    }, [])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -448,7 +460,7 @@ export default function ProfileScreen() {
             <Text style={styles.statLabel}>Matches</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>0</Text>
+            <Text style={styles.statValue}>{gamesPlayed}</Text>
             <Text style={styles.statLabel}>Games Played</Text>
           </View>
         </View>

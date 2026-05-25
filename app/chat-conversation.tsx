@@ -31,6 +31,7 @@ import { MATCH_SPORTS } from "@/constants/matchSports";
 import type { VenueSharePayload } from "@/constants/nearbyVenues";
 import { CONVERSATIONS_STORAGE_KEY } from "@/lib/conversationsStorage";
 import { convertVoiceToText } from "@/lib/convertVoiceToText";
+import { incrementUnreadPrivate } from "@/lib/notificationStore";
 
 const DARK_GREEN = "#052e16";
 const ACCENT_GREEN = "#15803d";
@@ -514,6 +515,9 @@ export default function ChatConversationScreen() {
 
   const appendMessage = useCallback(
     (msg: Omit<ChatMessage, "id" | "createdAt">) => {
+      if (!msg.sent) {
+        void incrementUnreadPrivate();
+      }
       setMessages((prev) => {
         const next = [
           ...prev,

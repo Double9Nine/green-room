@@ -16,6 +16,7 @@ import {
 } from "react-native-safe-area-context";
 
 import type { PlazaEvent } from "./(tabs)/explore";
+import { formatEventTime } from "./(tabs)/explore";
 import {
   displayUserLabel,
   getCurrentUser,
@@ -33,17 +34,25 @@ import {
   cancelJoinRequest,
   CURRENT_USER_ID,
   ensureDemoEventSeed,
-  getConfirmedForEvent,
+  EVENT_MEMBERS_KEY,
+  EVENT_REQUESTS_KEY,
   getMyStatusForEvent,
-  getOccupiedForCapacity,
-  isEventAtCapacity,
   leaveEvent,
   loadEventMembers,
+  loadEventRequests,
+  loadPendingRequests,
+  saveEventRequests,
+  savePendingRequests,
   type EventDisplayMember,
+  type EventRequest,
+  type EventRequestsByEvent,
   type MemberStatus,
-  resolveEventSpotsAndMembers,
   submitJoinRequest,
 } from "../lib/eventRequestStorage";
+import {
+  incrementJoinedStatusChanges,
+  incrementPendingRequests,
+} from "../lib/notificationStore";
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -86,6 +95,13 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
+function isEventExpired(event: { time?: string } | null | undefined): boolean {
+  if (!event?.time) return false;
+  const t = new Date(event.time).getTime();
+  if (isNaN(t)) return false;
+  return t < Date.now();
+}
+
 export default function EventDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -106,8 +122,14 @@ export default function EventDetailsScreen() {
   const [groupChatPreview, setGroupChatPreview] = useState<GroupChatMessage[]>(
     []
   );
+  const [toast, setToast] = useState("");
 
   const eventId = Number(params.eventId);
+
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(""), 2500);
+  }, []);
 
   const refreshState = useCallback(async () => {
     if (!eventId) return;
@@ -142,27 +164,6 @@ export default function EventDetailsScreen() {
     event?.organizerInitial ?? getInitials(organizerName);
   const maxSpots = event?.maxSpots ?? 0;
 
-  const { members: eventMembers, occupiedForCapacity, full } = useMemo(() => {
-    if (!event) {
-      return {
-        members: [] as EventDisplayMember[],
-        occupiedForCapacity: 0,
-        full: false,
-      };
-    }
-    const confirmed = getConfirmedForEvent(eventMembersMap, event.id);
-    const resolved = resolveEventSpotsAndMembers(
-      event,
-      confirmed,
-      !event.createdByMe
-    );
-    const occupied = getOccupiedForCapacity(event, confirmed);
-    return {
-      members: resolved.members,
-      occupiedForCapacity: occupied,
-      full: isEventAtCapacity(event, confirmed),
-    };
-  }, [event, eventMembersMap]);
   const isHost =
     !!event &&
     (event.createdByMe === true ||
@@ -177,6 +178,20 @@ export default function EventDetailsScreen() {
     if (!event) return [] as EventDisplayMember[];
     return buildConfirmedMembersList(event, eventMembersMap, event.id);
   }, [event, eventMembersMap]);
+
+  const displaySpots = event
+    ? isOrganizer
+      ? confirmedMembers.length
+      : event.spots
+    : 0;
+
+  const isFull = event
+    ? isOrganizer
+      ? confirmedMembers.length >= event.maxSpots
+      : event.spots >= event.maxSpots
+    : false;
+
+  const cannotJoin = isOrganizer ? false : (event?.spots ?? 0) >= maxSpots;
 
   const validMembers = useMemo(
     () =>
@@ -313,12 +328,16 @@ export default function EventDetailsScreen() {
     (effectiveStatus === "none" || effectiveStatus === "pending");
 
   const handleRequestToJoin = async () => {
-    if (!event || full) return;
-    await submitJoinRequest(event.id, {
-      name: currentUser.name,
-      initial: currentUser.initial,
-      userId: CURRENT_USER_ID,
-    });
+    if (!event || cannotJoin) return;
+    await submitJoinRequest(
+      event.id,
+      {
+        name: currentUser.name,
+        initial: currentUser.initial,
+        userId: CURRENT_USER_ID,
+      },
+      event as unknown as Record<string, unknown>
+    );
     setMyStatus("pending");
     await refreshState();
   };
@@ -350,6 +369,74 @@ export default function EventDetailsScreen() {
         },
       },
     ]);
+  };
+
+  const handleRemoveMember = (member: EventDisplayMember) => {
+    if (!event || member.isOrganizer) return;
+
+    Alert.alert(
+      "Remove Member",
+      `Are you sure you want to remove ${member.name} from this event?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              const key = String(event.id);
+              const membersRaw = await AsyncStorage.getItem(EVENT_MEMBERS_KEY);
+              const allMembers = membersRaw
+                ? (JSON.parse(membersRaw) as EventRequestsByEvent)
+                : {};
+              const eventMembers = allMembers[key] ?? [];
+              const entry = eventMembers.find((m) => m.userName === member.name);
+
+              allMembers[key] = eventMembers.filter((m) =>
+                entry ? m.userId !== entry.userId : m.userName !== member.name
+              );
+              await AsyncStorage.setItem(
+                EVENT_MEMBERS_KEY,
+                JSON.stringify(allMembers)
+              );
+
+              const pending = await loadPendingRequests();
+              if (entry) {
+                await savePendingRequests({
+                  ...pending,
+                  [key]: (pending[key] ?? []).filter(
+                    (r) => r.userId !== entry.userId
+                  ),
+                });
+              }
+
+              const requestsRaw = await AsyncStorage.getItem(EVENT_REQUESTS_KEY);
+              const allRequests = requestsRaw
+                ? (JSON.parse(requestsRaw) as EventRequest[])
+                : [];
+              const updatedRequests = allRequests.map((r) =>
+                r.eventId === event.id && r.userName === member.name
+                  ? { ...r, status: "removed" as MemberStatus }
+                  : r
+              );
+              await AsyncStorage.setItem(
+                EVENT_REQUESTS_KEY,
+                JSON.stringify(updatedRequests)
+              );
+
+              const removedIsCurrentUser =
+                entry?.userId === CURRENT_USER_ID ||
+                isCurrentUser(member.name, currentUser.name);
+              if (removedIsCurrentUser) {
+                await incrementJoinedStatusChanges();
+              }
+              await refreshState();
+              showToast(`${member.name} has been removed from the event`);
+            })();
+          },
+        },
+      ]
+    );
   };
 
   const renderJoinAction = (
@@ -401,7 +488,7 @@ export default function EventDetailsScreen() {
       );
     }
 
-    const canRequest = !full;
+    const canRequest = !cannotJoin;
 
     if (myStatus === "rejected") {
       return renderJoinAction(
@@ -409,6 +496,12 @@ export default function EventDetailsScreen() {
         () => void handleRequestAgain(),
         canRequest
       );
+    }
+
+    const eventExpired = isEventExpired(event);
+
+    if (myStatus === "none" && eventExpired) {
+      return renderJoinAction("Event Has Passed", () => {}, false);
     }
 
     return renderJoinAction(
@@ -445,55 +538,184 @@ export default function EventDetailsScreen() {
           ) : null}
         </View>
 
+        {__DEV__ && isOrganizer && event && event.id ? (
+          <Pressable
+            onPress={async () => {
+              if (!event) return;
+
+              const pending = await loadPendingRequests();
+              const key = String(event.id);
+              const eventPending = [...(pending[key] ?? [])];
+
+              const dummyRequesters = [
+                { name: "Test User A", initial: "A" },
+                { name: "Test User B", initial: "B" },
+                { name: "Test User C", initial: "C" },
+                { name: "Test User D", initial: "D" },
+              ];
+
+              const picked =
+                dummyRequesters[eventPending.length % dummyRequesters.length];
+              const userId = `dev-generate-${Date.now()}-${eventPending.length}`;
+              const entry = {
+                eventId: event.id,
+                userId,
+                userName: picked.name,
+                userInitial: picked.initial,
+                status: "pending" as const,
+                requestedAt: Date.now(),
+              };
+
+              eventPending.push(entry);
+              await savePendingRequests({ ...pending, [key]: eventPending });
+
+              let requests = await loadEventRequests();
+              requests = [
+                ...requests.filter(
+                  (r) => !(r.eventId === event.id && r.userId === userId)
+                ),
+                entry,
+              ];
+              await saveEventRequests(requests);
+
+              await incrementPendingRequests();
+              await refreshState();
+              showToast(`🧪 Request from ${picked.name} added!`);
+            }}
+            style={styles.devGenerateBtn}
+          >
+            <Text style={styles.devGenerateBtnText}>
+              🧪 DEV: Generate Join Request
+            </Text>
+          </Pressable>
+        ) : null}
+
         {__DEV__ && myStatus === "pending" && (
+          <>
+            <Pressable
+              onPress={async () => {
+                const user = await getCurrentUser();
+
+                const requestsRaw = await AsyncStorage.getItem("eventRequests");
+                const requests = requestsRaw ? JSON.parse(requestsRaw) : [];
+                const updated = requests.map((r: any) =>
+                  r.eventId === event.id ? { ...r, status: "confirmed" } : r
+                );
+                await AsyncStorage.setItem(
+                  "eventRequests",
+                  JSON.stringify(updated)
+                );
+
+                const membersRaw = await AsyncStorage.getItem("eventMembers");
+                const allMembers = membersRaw ? JSON.parse(membersRaw) : {};
+                const eventId = event.id;
+                const eventMembers = (allMembers[eventId] || []).filter(
+                  (m: any) => m && m.name
+                );
+                if (!eventMembers.find((m: any) => m.name === user.name)) {
+                  eventMembers.push({
+                    name: user.name,
+                    initial: user.initial,
+                    isOrganizer: false,
+                  });
+                }
+                allMembers[eventId] = eventMembers;
+                await AsyncStorage.setItem(
+                  "eventMembers",
+                  JSON.stringify(allMembers)
+                );
+
+                setMyStatus("confirmed");
+                await incrementJoinedStatusChanges();
+              }}
+              style={{
+                backgroundColor: "#f59e0b",
+                padding: 8,
+                borderRadius: 8,
+                margin: 16,
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 12 }}>
+                🧪 DEV: Auto Approve My Request
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={async () => {
+                const requestsRaw = await AsyncStorage.getItem("eventRequests");
+                const requests = requestsRaw ? JSON.parse(requestsRaw) : [];
+                const updated = requests.map((r: any) =>
+                  r.eventId === event.id ? { ...r, status: "rejected" } : r
+                );
+                await AsyncStorage.setItem(
+                  "eventRequests",
+                  JSON.stringify(updated)
+                );
+                setMyStatus("rejected");
+                await incrementJoinedStatusChanges();
+              }}
+              style={{
+                backgroundColor: "#dc2626",
+                padding: 8,
+                borderRadius: 8,
+                margin: 16,
+                marginTop: 0,
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 12 }}>
+                🧪 DEV: Auto Reject My Request
+              </Text>
+            </Pressable>
+          </>
+        )}
+
+        {__DEV__ && myStatus === "confirmed" && !isOrganizer ? (
           <Pressable
             onPress={async () => {
               const user = await getCurrentUser();
+              const key = String(event.id);
 
-              const requestsRaw = await AsyncStorage.getItem("eventRequests");
-              const requests = requestsRaw ? JSON.parse(requestsRaw) : [];
-              const updated = requests.map((r: any) =>
-                r.eventId === event.id ? { ...r, status: "confirmed" } : r
+              const membersRaw = await AsyncStorage.getItem(EVENT_MEMBERS_KEY);
+              const allMembers = membersRaw
+                ? (JSON.parse(membersRaw) as EventRequestsByEvent)
+                : {};
+              const eventMembers = allMembers[key] ?? [];
+              allMembers[key] = eventMembers.filter(
+                (m) =>
+                  m.userId !== CURRENT_USER_ID && m.userName !== user.name
               );
               await AsyncStorage.setItem(
-                "eventRequests",
-                JSON.stringify(updated)
-              );
-
-              const membersRaw = await AsyncStorage.getItem("eventMembers");
-              const allMembers = membersRaw ? JSON.parse(membersRaw) : {};
-              const eventId = event.id;
-              const eventMembers = (allMembers[eventId] || []).filter(
-                (m: any) => m && m.name
-              );
-              if (!eventMembers.find((m: any) => m.name === user.name)) {
-                eventMembers.push({
-                  name: user.name,
-                  initial: user.initial,
-                  isOrganizer: false,
-                });
-              }
-              allMembers[eventId] = eventMembers;
-              await AsyncStorage.setItem(
-                "eventMembers",
+                EVENT_MEMBERS_KEY,
                 JSON.stringify(allMembers)
               );
 
-              setMyStatus("confirmed");
+              const requestsRaw = await AsyncStorage.getItem(EVENT_REQUESTS_KEY);
+              const allRequests = requestsRaw
+                ? (JSON.parse(requestsRaw) as EventRequest[])
+                : [];
+              const updatedRequests = allRequests.map((r) =>
+                r.eventId === event.id && r.userId === CURRENT_USER_ID
+                  ? { ...r, status: "removed" as MemberStatus }
+                  : r
+              );
+              await AsyncStorage.setItem(
+                EVENT_REQUESTS_KEY,
+                JSON.stringify(updatedRequests)
+              );
+
+              await incrementJoinedStatusChanges();
+              setMyStatus("removed");
+              showToast("🧪 DEV: You have been removed from this event");
             }}
-            style={{
-              backgroundColor: "#f59e0b",
-              padding: 8,
-              borderRadius: 8,
-              margin: 16,
-              alignItems: "center",
-            }}
+            style={styles.devSimulateRemovedBtn}
           >
-            <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 12 }}>
-              🧪 DEV: Auto Approve My Request
+            <Text style={styles.devSimulateRemovedBtnText}>
+              🧪 DEV: Simulate Being Removed
             </Text>
           </Pressable>
-        )}
+        ) : null}
 
         <ScrollView
           style={styles.scroll}
@@ -530,16 +752,16 @@ export default function EventDetailsScreen() {
               <View
                 style={[
                   styles.statusPill,
-                  full ? styles.statusPillFull : styles.statusPillOpen,
+                  isFull ? styles.statusPillFull : styles.statusPillOpen,
                 ]}
               >
                 <Text
                   style={[
                     styles.statusPillText,
-                    full ? styles.statusPillTextFull : styles.statusPillTextOpen,
+                    isFull ? styles.statusPillTextFull : styles.statusPillTextOpen,
                   ]}
                 >
-                  {full ? "Event Full" : "Open"}
+                  {isFull ? "Event Full" : "Open"}
                 </Text>
               </View>
             </View>
@@ -552,17 +774,19 @@ export default function EventDetailsScreen() {
               <Text style={styles.infoRowText}>📍 {event.location}</Text>
             </View>
             <View style={styles.infoRow}>
-              <Text style={styles.infoRowText}>🕐 {event.time}</Text>
+              <Text style={styles.infoRowText}>🕐 {formatEventTime(event.time)}</Text>
             </View>
             <View style={styles.infoRow}>
               <Text
                 style={[
                   styles.infoRowText,
-                  full ? styles.spotsFull : styles.spotsAvailable,
+                  isFull ? styles.spotsFull : styles.spotsAvailable,
                 ]}
               >
-                👥 {occupiedForCapacity}/{maxSpots}
-                {full ? " (Full)" : ` · ${maxSpots - occupiedForCapacity} spots left`}
+                👥 {displaySpots}/{maxSpots}
+                {isFull
+                  ? " (Full)"
+                  : ` · ${maxSpots - displaySpots} spots left`}
               </Text>
             </View>
           </View>
@@ -629,31 +853,44 @@ export default function EventDetailsScreen() {
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
+                style={styles.membersScroll}
                 contentContainerStyle={styles.membersRow}
               >
-                {validMembers.map((member) => (
+                {validMembers.map((member, index) => (
                   <View
-                    key={member?.name ?? "Unknown"}
+                    key={`member-${index}-${member?.name ?? "unknown"}`}
                     style={styles.memberListItem}
                   >
-                    <Pressable onPress={() => openMemberProfile(member)}>
-                      <View style={styles.memberListAvatar}>
-                        <Text style={styles.memberListAvatarText}>
-                          {member?.name?.[0] ?? "?"}
-                        </Text>
-                      </View>
-                      <Text style={styles.memberListFirstName}>
-                        {displayUserLabel(
-                          member?.name ?? "Unknown",
-                          currentUser.name
-                        ).split(" ")[0]}
-                      </Text>
-                      {member.isOrganizer ? (
-                        <Text style={styles.memberListOrganizerLabel}>
-                          Organizer
-                        </Text>
+                    <View style={styles.memberAvatarWrap}>
+                      <Pressable onPress={() => openMemberProfile(member)}>
+                        <View style={styles.memberListAvatar}>
+                          <Text style={styles.memberListAvatarText}>
+                            {getInitials(member?.name ?? "?").slice(0, 1) ||
+                              "?"}
+                          </Text>
+                        </View>
+                      </Pressable>
+                      {isOrganizer && !member.isOrganizer ? (
+                        <Pressable
+                          onPress={() => handleRemoveMember(member)}
+                          style={styles.memberRemoveBtn}
+                          hitSlop={6}
+                        >
+                          <Text style={styles.memberRemoveBtnText}>×</Text>
+                        </Pressable>
                       ) : null}
-                    </Pressable>
+                    </View>
+                    <Text style={styles.memberListFirstName}>
+                      {displayUserLabel(
+                        member?.name ?? "Unknown",
+                        currentUser.name
+                      ).split(" ")[0]}
+                    </Text>
+                    {member.isOrganizer ? (
+                      <Text style={styles.memberListOrganizerLabel}>
+                        Organizer
+                      </Text>
+                    ) : null}
                     {isHost && !member.isOrganizer ? (
                       <Pressable
                         onPress={() => openMessageMember(member)}
@@ -740,6 +977,11 @@ export default function EventDetailsScreen() {
           {renderBottomBar()}
         </View>
 
+        {toast ? (
+          <View style={[styles.toastWrap, { bottom: insets.bottom + 100 }]}>
+            <Text style={styles.toastText}>{toast}</Text>
+          </View>
+        ) : null}
       </SafeAreaView>
     </>
   );
@@ -830,12 +1072,41 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 12,
   },
+  membersScroll: {
+    overflow: "visible",
+  },
   membersRow: {
     paddingRight: 8,
+    overflow: "visible",
   },
   memberListItem: {
     alignItems: "center",
     marginRight: 16,
+    overflow: "visible",
+  },
+  memberAvatarWrap: {
+    position: "relative",
+    overflow: "visible",
+  },
+  memberRemoveBtn: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#dc2626",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#ffffff",
+    zIndex: 999,
+  },
+  memberRemoveBtnText: {
+    color: "#ffffff",
+    fontSize: 10,
+    fontWeight: "900",
+    lineHeight: 14,
   },
   memberListAvatar: {
     width: 56,
@@ -1079,4 +1350,45 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   errorText: { marginTop: 24, textAlign: "center", fontSize: 16, color: MUTED },
+  devGenerateBtn: {
+    backgroundColor: "#0ea5e9",
+    padding: 8,
+    borderRadius: 8,
+    margin: 16,
+    alignItems: "center",
+  },
+  devGenerateBtnText: {
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  devSimulateRemovedBtn: {
+    backgroundColor: "#dc2626",
+    padding: 8,
+    borderRadius: 8,
+    margin: 16,
+    alignItems: "center",
+  },
+  devSimulateRemovedBtnText: {
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  toastWrap: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    backgroundColor: "#052e16",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    zIndex: 20,
+  },
+  toastText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
+    textAlign: "center",
+  },
 });
