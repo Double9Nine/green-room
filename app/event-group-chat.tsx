@@ -40,7 +40,10 @@ import { MATCH_SPORTS } from "@/constants/matchSports";
 import type { VenueSharePayload } from "@/constants/nearbyVenues";
 import { getCurrentUser, type CurrentUser } from "../lib/getCurrentUser";
 import { convertVoiceToText } from "../lib/convertVoiceToText";
-import { upsertGroupChatConversation } from "../lib/groupChatConversationsStorage";
+import {
+  GROUP_CHAT_CONVERSATIONS_KEY,
+  upsertGroupChatConversation,
+} from "../lib/groupChatConversationsStorage";
 import { incrementUnreadGroup } from "../lib/notificationStore";
 import {
   applyMessagesForViewer,
@@ -81,6 +84,7 @@ function formatMessageTime(date: Date): string {
   return date.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   });
 }
 
@@ -237,14 +241,23 @@ export default function EventGroupChatScreen() {
     const loadedMessages = await loadGroupChatMessages(eventId);
     const forViewer = applyMessagesForViewer(loadedMessages, user.name);
     setMessages(forViewer);
-    await upsertGroupChatConversation({
-      eventId,
-      eventTitle,
-      sportEmoji,
-      organizer,
-      lastMessage: getGroupChatPreviewText(loadedMessages),
-      lastMessageTime: Date.now(),
-    });
+
+    const existingRaw = await AsyncStorage.getItem(GROUP_CHAT_CONVERSATIONS_KEY);
+    const existingList = existingRaw ? JSON.parse(existingRaw) : [];
+    const existingConvo = existingList.find(
+      (c: { eventId?: string }) => c.eventId === eventId
+    );
+
+    if (!existingConvo) {
+      await upsertGroupChatConversation({
+        eventId,
+        eventTitle,
+        sportEmoji,
+        organizer,
+        lastMessage: "",
+        lastMessageTime: Date.now(),
+      });
+    }
   }, [eventId, eventTitle, organizer, sportEmoji]);
 
   useFocusEffect(
@@ -716,6 +729,29 @@ export default function EventGroupChatScreen() {
     return curr.createdAt - prev.createdAt > 60 * 1000;
   };
 
+  const formatMessageTimestamp = (createdAt: number): string => {
+    if (!createdAt) return "";
+    const now = new Date();
+    const msgDate = new Date(createdAt);
+    const nowDay = new Date(
+      now.getFullYear(), now.getMonth(), now.getDate()
+    ).getTime();
+    const msgDay = new Date(
+      msgDate.getFullYear(), msgDate.getMonth(), msgDate.getDate()
+    ).getTime();
+    const diffDays = Math.round((nowDay - msgDay) / (1000 * 60 * 60 * 24));
+    const timeStr = msgDate.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    if (diffDays === 0) return timeStr;
+    if (diffDays === 1) return `Yesterday ${timeStr}`;
+    if (diffDays < 7)
+      return `${msgDate.toLocaleDateString("en-US", { weekday: "short" })} ${timeStr}`;
+    return `${msgDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${timeStr}`;
+  };
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -814,7 +850,9 @@ export default function EventGroupChatScreen() {
               return (
                 <React.Fragment key={msg.id}>
                   {shouldShowTime(index) ? (
-                    <Text style={styles.timeLabel}>{msg.time}</Text>
+                    <Text style={styles.timeLabel}>
+                      {formatMessageTimestamp(msg.createdAt)}
+                    </Text>
                   ) : null}
                   <View
                     style={[

@@ -591,9 +591,6 @@ export default function ChatConversationScreen() {
     [saveConversation, updateLastMessage]
   );
 
-  useEffect(() => {
-    void saveConversation();
-  }, []);
 
   const appendMessage = useCallback(
     (msg: Omit<ChatMessage, "id" | "createdAt">) => {
@@ -613,8 +610,10 @@ export default function ChatConversationScreen() {
         return next;
       });
       scrollToEnd();
-      const preview = getSentMessagePreview(msg);
-      void persistAfterSend(preview ?? "");
+      if (msg.sent) {
+        const preview = getSentMessagePreview(msg);
+        void persistAfterSend(preview ?? "");
+      }
     },
     [persistAfterSend, scrollToEnd]
   );
@@ -687,6 +686,29 @@ export default function ChatConversationScreen() {
     const previous = msgs[index - 1];
     if (!current.createdAt || !previous.createdAt) return true;
     return current.createdAt - previous.createdAt > 60 * 1000;
+  };
+
+  const formatMessageTimestamp = (createdAt: number): string => {
+    if (!createdAt) return "";
+    const now = new Date();
+    const msgDate = new Date(createdAt);
+    const nowDay = new Date(
+      now.getFullYear(), now.getMonth(), now.getDate()
+    ).getTime();
+    const msgDay = new Date(
+      msgDate.getFullYear(), msgDate.getMonth(), msgDate.getDate()
+    ).getTime();
+    const diffDays = Math.round((nowDay - msgDay) / (1000 * 60 * 60 * 24));
+    const timeStr = msgDate.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    if (diffDays === 0) return timeStr;
+    if (diffDays === 1) return `Yesterday ${timeStr}`;
+    if (diffDays < 7)
+      return `${msgDate.toLocaleDateString("en-US", { weekday: "short" })} ${timeStr}`;
+    return `${msgDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${timeStr}`;
   };
 
   const openProfile = () => {
@@ -1288,10 +1310,7 @@ export default function ChatConversationScreen() {
                 <React.Fragment key={msg.id}>
                   {shouldShowTime(messages, index) && !isConverted ? (
                     <Text style={styles.msgTimeLabel}>
-                      {new Date(msg.createdAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {formatMessageTimestamp(msg.createdAt)}
                     </Text>
                   ) : null}
                 <View

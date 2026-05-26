@@ -50,17 +50,26 @@ const ACTION_WIDTH = 70;
 const SWIPE_ACTIONS_WIDTH = ACTION_WIDTH * 2;
 
 function formatConversationTime(timestamp: number) {
+  if (!timestamp) return "";
   const date = new Date(timestamp);
   const now = new Date();
-  const isToday =
-    date.getDate() === now.getDate() &&
-    date.getMonth() === now.getMonth() &&
-    date.getFullYear() === now.getFullYear();
 
-  if (isToday) {
-    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const nowDay = new Date(
+    now.getFullYear(), now.getMonth(), now.getDate()
+  ).getTime();
+  const msgDay = new Date(
+    date.getFullYear(), date.getMonth(), date.getDate()
+  ).getTime();
+
+  const diffDays = Math.round((nowDay - msgDay) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
   }
-
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) {
+    return date.toLocaleDateString([], { weekday: "short" });
+  }
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
