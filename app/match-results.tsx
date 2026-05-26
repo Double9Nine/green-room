@@ -63,6 +63,7 @@ type Player = {
   purpose: string;
   tags: string[];
   photo: string | null;
+  gamesPlayed: number;
 };
 
 const DUMMY_PLAYERS: Player[] = [
@@ -76,6 +77,7 @@ const DUMMY_PLAYERS: Player[] = [
     purpose: "Trying to level up 🏆",
     tags: ["Low-key competitive", "Won't flake"],
     photo: null,
+    gamesPlayed: 12,
   },
   {
     id: 2,
@@ -87,6 +89,7 @@ const DUMMY_PLAYERS: Player[] = [
     purpose: "Looking for my go-to partner 🤝",
     tags: ["Chill vibes only", "Good banter"],
     photo: null,
+    gamesPlayed: 8,
   },
   {
     id: 3,
@@ -98,6 +101,7 @@ const DUMMY_PLAYERS: Player[] = [
     purpose: "Just here to meet people 😎",
     tags: ["Social cardio", "Shows up"],
     photo: null,
+    gamesPlayed: 21,
   },
   {
     id: 4,
@@ -109,6 +113,7 @@ const DUMMY_PLAYERS: Player[] = [
     purpose: "Just trying to stay active 🏃",
     tags: ["Beginner-friendly", "No pressure"],
     photo: null,
+    gamesPlayed: 5,
   },
   {
     id: 5,
@@ -120,6 +125,7 @@ const DUMMY_PLAYERS: Player[] = [
     purpose: "Trying to level up 🏆",
     tags: ["Down for a challenge", "Chatty", "Won't flake"],
     photo: null,
+    gamesPlayed: 17,
   },
   {
     id: 6,
@@ -131,6 +137,7 @@ const DUMMY_PLAYERS: Player[] = [
     purpose: "Looking for my go-to partner 🤝",
     tags: ["Low-key competitive", "Shows up"],
     photo: null,
+    gamesPlayed: 34,
   },
   {
     id: 7,
@@ -142,6 +149,7 @@ const DUMMY_PLAYERS: Player[] = [
     purpose: "Just here to meet people 😎",
     tags: ["Chill vibes only", "Beginner-friendly"],
     photo: null,
+    gamesPlayed: 3,
   },
   {
     id: 8,
@@ -153,6 +161,7 @@ const DUMMY_PLAYERS: Player[] = [
     purpose: "Other ✨",
     tags: ["Good banter", "No pressure", "Social cardio"],
     photo: null,
+    gamesPlayed: 9,
   },
 ];
 
@@ -573,6 +582,7 @@ export default function MatchResultsScreen() {
           playerLocation: player.location,
           playerSkill: player.skill,
           playerPurpose: player.purpose,
+          playerGamesPlayed: String(player.gamesPlayed),
           sportEmoji: selectedSportEmoji,
         },
       });

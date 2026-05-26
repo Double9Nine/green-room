@@ -913,7 +913,7 @@ export default function EventGroupChatScreen() {
 
                     {msg.sent ? (
                       <Pressable
-                        onPress={() => router.push("/(tabs)/profile")}
+                        onPress={() => router.push("/my-profile")}
                         style={styles.msgAvatar}
                       >
                         {myProfile?.photo ? (

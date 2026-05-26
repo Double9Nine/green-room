@@ -1391,7 +1391,7 @@ export default function ChatConversationScreen() {
                     <MessageAvatar
                       name={myProfile?.name ?? "Me"}
                       photo={myProfile?.photo ?? null}
-                      onPress={() => router.push("/(tabs)/profile")}
+                      onPress={() => router.push("/my-profile")}
                     />
                   ) : null}
                 </View>

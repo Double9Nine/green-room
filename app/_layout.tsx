@@ -78,6 +78,10 @@ export default function RootLayout() {
           name="event-group-chat"
           options={{ headerShown: false }}
         />
+        <Stack.Screen
+          name="my-profile"
+          options={{ headerShown: false }}
+        />
       </Stack>
       <StatusBar style="auto" />
     </GestureHandlerRootView>

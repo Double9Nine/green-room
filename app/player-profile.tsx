@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Image,
   Modal,
@@ -62,6 +63,7 @@ export default function PlayerProfileScreen() {
     playerPurpose?: string;
     playerTags?: string;
     playerPhoto?: string;
+    playerGamesPlayed?: string;
     sportEmoji?: string;
     hideLocation?: string;
     hideAvailability?: string;
@@ -69,8 +71,21 @@ export default function PlayerProfileScreen() {
   }>();
 
   const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [gamesPlayed, setGamesPlayed] = useState(0);
 
   const playerName = params.playerName ?? "Player";
+
+  useEffect(() => {
+    AsyncStorage.getItem("userProfile").then((raw) => {
+      const profile = raw ? JSON.parse(raw) : {};
+      if (profile.name && profile.name === playerName) {
+        setGamesPlayed(profile.gamesPlayed ?? 0);
+      } else {
+        setGamesPlayed(Number(params.playerGamesPlayed) || 0);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const playerPhoto = params.playerPhoto?.trim() || null;
   const hideLocation = params.hideLocation === "true";
   const hideAvailability = params.hideAvailability === "true";
@@ -118,7 +133,7 @@ export default function PlayerProfileScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <SafeAreaView style={styles.safe} edges={["top"]}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#052e16" }} edges={["top"]}>
         <View style={styles.header}>
           <Pressable
             onPress={() => router.back()}
@@ -132,6 +147,7 @@ export default function PlayerProfileScreen() {
           <View style={styles.headerSpacer} />
         </View>
 
+        <View style={{ flex: 1, backgroundColor: "#f0fdf4" }}>
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[
@@ -188,6 +204,13 @@ export default function PlayerProfileScreen() {
             </View>
           ) : null}
 
+          <View style={styles.gamesPlayedRow}>
+            <Ionicons name="trophy-outline" size={18} color="#64748b" />
+            <Text style={styles.gamesPlayedText}>
+              {gamesPlayed} games played
+            </Text>
+          </View>
+
           {!hideAvailability ? (
             <>
               <Text style={styles.sectionLabel}>Availability</Text>
@@ -243,6 +266,7 @@ export default function PlayerProfileScreen() {
             </Pressable>
           </View>
         ) : null}
+        </View>
       </SafeAreaView>
 
       <Modal
@@ -312,8 +336,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: DARK_GREEN,
+    paddingBottom: 12,
+    paddingTop: 4,
+    backgroundColor: "#052e16",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(212,175,55,0.25)",
   },
   headerBack: {
     flexDirection: "row",
@@ -417,6 +444,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: ACCENT_GREEN,
+  },
+  gamesPlayedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 12,
+  },
+  gamesPlayedText: {
+    color: "#64748b",
+    fontSize: 15,
+    fontWeight: "500",
   },
   sectionLabel: {
     alignSelf: "stretch",
