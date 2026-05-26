@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -120,6 +120,7 @@ export default function EventGroupChatScreen() {
 
   const [confirmedMembers, setConfirmedMembers] = useState<ChatMember[]>([]);
   const [messages, setMessages] = useState<GroupChatMessage[]>([]);
+  const [myProfile, setMyProfile] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
     name: "You",
     initial: "Y",
@@ -136,6 +137,7 @@ export default function EventGroupChatScreen() {
     string | null
   >(null);
   const [venueModalVisible, setVenueModalVisible] = useState(false);
+  const [showMembersModal, setShowMembersModal] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
@@ -251,6 +253,12 @@ export default function EventGroupChatScreen() {
       void loadChatData();
     }, [loadAllMembers, loadChatData])
   );
+
+  useEffect(() => {
+    AsyncStorage.getItem("userProfile").then((raw) => {
+      if (raw) setMyProfile(JSON.parse(raw));
+    });
+  }, []);
 
   const appendMessage = useCallback(
     (
@@ -673,8 +681,23 @@ export default function EventGroupChatScreen() {
       );
       closeActionSheet();
     } else if (key === "delete") {
-      applyAndPersist((prev) => prev.filter((m) => m.id !== targetId));
       closeActionSheet();
+      Alert.alert(
+        "Delete Message",
+        "This will remove the message from your view only.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => {
+              applyAndPersist((prev) =>
+                prev.filter((m) => m.id !== targetId)
+              );
+            },
+          },
+        ]
+      );
     } else if (key === "convert") {
       if (isConverting) return;
       const target = messages.find((m) => m.id === targetId);
@@ -685,10 +708,18 @@ export default function EventGroupChatScreen() {
   const stackAvatars = confirmedMembers.slice(0, 4);
   const overflowCount = confirmedMembers.length - 4;
 
+  const shouldShowTime = (index: number): boolean => {
+    if (index === 0) return true;
+    const curr = messages[index];
+    const prev = messages[index - 1];
+    if (!curr.createdAt || !prev.createdAt) return true;
+    return curr.createdAt - prev.createdAt > 60 * 1000;
+  };
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <SafeAreaView style={styles.safe} edges={["top"]}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#052e16" }} edges={["top"]}>
         <View style={styles.header}>
           <Pressable
             onPress={() => router.back()}
@@ -708,7 +739,11 @@ export default function EventGroupChatScreen() {
             </Text>
           </View>
 
-          <View style={styles.avatarStack}>
+          <Pressable
+            style={styles.avatarStack}
+            onPress={() => setShowMembersModal(true)}
+            hitSlop={8}
+          >
             {stackAvatars.length === 0 ? (
               <View style={[styles.stackAvatar, styles.stackAvatarOrganizer]}>
                 <Text style={styles.stackAvatarTextOrganizer}>?</Text>
@@ -751,7 +786,7 @@ export default function EventGroupChatScreen() {
                 </Text>
               </View>
             ) : null}
-          </View>
+          </Pressable>
         </View>
 
         <KeyboardAvoidingView
@@ -772,119 +807,98 @@ export default function EventGroupChatScreen() {
                 No messages yet. Say hi to the group!
               </Text>
             ) : null}
-            {messages.map((msg) => {
-              const isSent = msg.sent;
-              const isLocation = msg.type === "location";
+            {messages.map((msg, index) => {
+              const canLongPress = !msg.recalled && !msg.isConvertedTranscript;
               const isPhoto = msg.type === "photo" || msg.type === "image";
-              const isVoice = msg.type === "voice";
-              const isVenue = msg.type === "venue";
-              const isConverted = msg.isConvertedTranscript;
-              const isRecalled = msg.recalled;
-              const canLongPress = !isRecalled && !isConverted;
 
               return (
-                <View
-                  key={msg.id}
-                  style={[
-                    styles.bubbleRow,
-                    isSent ? styles.bubbleRowSent : styles.bubbleRowReceived,
-                    isConverted && styles.bubbleRowTranscript,
-                  ]}
-                >
-                  {!isSent && !isConverted ? (
-                    <View
-                      style={[
-                        styles.msgAvatar,
-                        { backgroundColor: senderAvatarColor(msg.sender) },
-                      ]}
-                    >
-                      <Text style={styles.msgAvatarText}>
-                        {msg.initial || memberInitial(msg.sender)}
-                      </Text>
-                    </View>
+                <React.Fragment key={msg.id}>
+                  {shouldShowTime(index) ? (
+                    <Text style={styles.timeLabel}>{msg.time}</Text>
                   ) : null}
-
-                  <View style={styles.bubbleColumn}>
-                    {!isSent && !isConverted ? (
-                      <Text style={styles.senderName}>{msg.sender}</Text>
+                  <View
+                    style={[
+                      styles.bubbleRow,
+                      msg.sent
+                        ? styles.bubbleRowSent
+                        : styles.bubbleRowReceived,
+                    ]}
+                  >
+                    {!msg.sent ? (
+                      <Pressable
+                        onPress={() =>
+                          router.push({
+                            pathname: "/player-profile",
+                            params: {
+                              playerName: msg.sender ?? "Member",
+                              playerSkill: "",
+                              sportEmoji,
+                              hideAvailability: "true",
+                            },
+                          })
+                        }
+                        style={[
+                          styles.msgAvatar,
+                          { backgroundColor: senderAvatarColor(msg.sender) },
+                        ]}
+                      >
+                        <Text style={styles.msgAvatarText}>
+                          {msg.initial ||
+                            msg.sender?.[0]?.toUpperCase() ||
+                            "?"}
+                        </Text>
+                      </Pressable>
                     ) : null}
 
                     <Pressable
                       onLongPress={
-                        canLongPress
-                          ? () => handleLongPress(msg)
-                          : undefined
+                        canLongPress ? () => handleLongPress(msg) : undefined
                       }
                       onPress={
-                        isPhoto && msg.imageUri && !isRecalled
+                        isPhoto && msg.imageUri && !msg.recalled
                           ? () => setFullImageUri(msg.imageUri ?? null)
                           : undefined
                       }
                       delayLongPress={400}
                       style={[
-                        richStyles.bubble,
-                        isRecalled && richStyles.bubbleRecalled,
-                        isConverted && !isRecalled && richStyles.bubbleConverted,
-                        isSent &&
-                          !isLocation &&
-                          !isPhoto &&
-                          !isVoice &&
-                          !isVenue &&
-                          !isConverted &&
-                          !isRecalled &&
-                          richStyles.bubbleSent,
-                        !isSent &&
-                          !isLocation &&
-                          !isPhoto &&
-                          !isVoice &&
-                          !isVenue &&
-                          !isConverted &&
-                          !isRecalled &&
-                          richStyles.bubbleReceived,
-                        isVenue && !isRecalled && richStyles.bubbleVenue,
-                        isLocation &&
-                          isSent &&
-                          !isRecalled &&
-                          richStyles.bubbleLocation,
-                        isLocation &&
-                          !isSent &&
-                          !isRecalled &&
-                          richStyles.bubbleLocationReceived,
-                        isPhoto &&
-                          isSent &&
-                          !isRecalled &&
-                          richStyles.bubblePhotoSent,
-                        isPhoto &&
-                          !isSent &&
-                          !isRecalled &&
-                          richStyles.bubblePhotoReceived,
-                        isVoice &&
-                          isSent &&
-                          !isRecalled &&
-                          richStyles.bubbleVoiceSent,
-                        isVoice &&
-                          !isSent &&
-                          !isRecalled &&
-                          richStyles.bubbleVoice,
+                        styles.bubble,
+                        msg.recalled && styles.bubbleRecalled,
+                        msg.sent && !msg.recalled && styles.bubbleSent,
+                        !msg.sent && !msg.recalled && styles.bubbleReceived,
                       ]}
                     >
+                      {!msg.sent ? (
+                        <Text style={styles.senderName}>{msg.sender}</Text>
+                      ) : null}
                       {renderRichBubbleContent(msg)}
                     </Pressable>
 
-                    {!isConverted ? (
-                      <Text
-                        style={[
-                          styles.messageTime,
-                          isSent
-                            ? styles.messageTimeSent
-                            : styles.messageTimeReceived,
-                        ]}
+                    {msg.sent ? (
+                      <Pressable
+                        onPress={() => router.push("/(tabs)/profile")}
+                        style={styles.msgAvatar}
                       >
-                        {msg.time}
-                      </Text>
+                        {myProfile?.photo ? (
+                          <Image
+                            source={{ uri: myProfile.photo }}
+                            style={{ width: 32, height: 32, borderRadius: 16 }}
+                          />
+                        ) : (
+                          <View
+                            style={[
+                              styles.msgAvatar,
+                              { backgroundColor: "#15803d" },
+                            ]}
+                          >
+                            <Text style={styles.msgAvatarText}>
+                              {currentUser.initial}
+                            </Text>
+                          </View>
+                        )}
+                      </Pressable>
                     ) : null}
                   </View>
-                </View>
+                </React.Fragment>
               );
             })}
           </ScrollView>
@@ -1076,6 +1090,130 @@ export default function EventGroupChatScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal
+        visible={showMembersModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowMembersModal(false)}
+      >
+        <Pressable
+          style={{ flex: 1 }}
+          onPress={() => setShowMembersModal(false)}
+        />
+        <View
+          style={{
+            backgroundColor: WHITE,
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            padding: 20,
+            maxHeight: "60%",
+          }}
+        >
+          <Text style={{ fontSize: 18, fontWeight: "800", marginBottom: 16, color: TEXT }}>
+            Members ({confirmedMembers.length})
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {confirmedMembers.map((member, index) => (
+              <View
+                key={index}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 12,
+                  paddingVertical: 12,
+                  borderBottomWidth: 0.5,
+                  borderBottomColor: BORDER,
+                }}
+              >
+                <Pressable
+                  onPress={() => {
+                    setShowMembersModal(false);
+                    router.push({
+                      pathname: "/player-profile",
+                      params: {
+                        playerName: member.name,
+                        playerSkill: "",
+                        sportEmoji,
+                        hideAvailability: "true",
+                      },
+                    });
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: member.isOrganizer ? ACCENT_GREEN : "#bfdbfe",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: member.isOrganizer ? WHITE : "#1e40af",
+                        fontSize: 16,
+                        fontWeight: "800",
+                      }}
+                    >
+                      {member.name?.[0] ?? "?"}
+                    </Text>
+                  </View>
+                </Pressable>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: "700", color: TEXT }}>
+                    {member.name}
+                  </Text>
+                  {member.isOrganizer ? (
+                    <Text style={{ fontSize: 12, color: ACCENT_GREEN, fontWeight: "600" }}>
+                      Organizer
+                    </Text>
+                  ) : null}
+                </View>
+
+                {member.isOrganizer && currentUser.name !== organizer ? (
+                  <Pressable
+                    onPress={() => {
+                      setShowMembersModal(false);
+                      router.push({
+                        pathname: "/chat-conversation",
+                        params: {
+                          playerName: member.name,
+                          playerSkill: "",
+                          playerLocation: "",
+                          sportEmoji,
+                          playerId: `organizer-${eventId}`,
+                          isOrganizerChat: "true",
+                          eventId: String(eventId),
+                          fromGroupChat: "true",
+                        },
+                      });
+                    }}
+                    style={{
+                      backgroundColor: ACCENT_GREEN,
+                      borderRadius: 20,
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                    }}
+                  >
+                    <Text style={{ color: WHITE, fontSize: 12, fontWeight: "700" }}>
+                      Private Chat
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          </ScrollView>
+          <Pressable
+            onPress={() => setShowMembersModal(false)}
+            style={{ paddingVertical: 16, alignItems: "center" }}
+          >
+            <Text style={{ color: MUTED, fontWeight: "600" }}>Close</Text>
+          </Pressable>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -1092,8 +1230,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: DARK_GREEN,
+    paddingBottom: 12,
+    paddingTop: 4,
+    backgroundColor: "#052e16",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(212,175,55,0.25)",
     gap: 8,
   },
   headerBack: {
@@ -1180,11 +1321,17 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingVertical: 32,
   },
+  timeLabel: {
+    fontSize: 11,
+    color: "#94a3b8",
+    textAlign: "center",
+    marginVertical: 4,
+  },
   bubbleRow: {
     flexDirection: "row",
-    marginBottom: 12,
     alignItems: "flex-end",
-    gap: 8,
+    marginBottom: 2,
+    paddingHorizontal: 8,
   },
   bubbleRowSent: {
     justifyContent: "flex-end",
@@ -1192,45 +1339,45 @@ const styles = StyleSheet.create({
   bubbleRowReceived: {
     justifyContent: "flex-start",
   },
-  bubbleRowTranscript: {
-    marginTop: -4,
-    paddingLeft: 44,
-  },
   msgAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 18,
+    marginHorizontal: 4,
   },
   msgAvatarText: {
+    color: "#ffffff",
     fontSize: 13,
     fontWeight: "800",
-    color: "#1e40af",
   },
-  bubbleColumn: {
-    maxWidth: "78%",
-    flexShrink: 1,
+  bubble: {
+    maxWidth: "75%",
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  bubbleRecalled: {
+    backgroundColor: "#e2e8f0",
+    borderWidth: 0,
+    paddingVertical: 8,
+  },
+  bubbleSent: {
+    backgroundColor: "#15803d",
+    borderBottomRightRadius: 4,
+  },
+  bubbleReceived: {
+    backgroundColor: "#ffffff",
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
   },
   senderName: {
     fontSize: 11,
-    fontWeight: "600",
-    color: MUTED,
+    fontWeight: "700",
+    color: "#15803d",
     marginBottom: 2,
-    marginLeft: 4,
-  },
-  messageTime: {
-    fontSize: 11,
-    color: MUTED,
-    marginTop: 4,
-  },
-  messageTimeSent: {
-    textAlign: "right",
-    marginRight: 4,
-  },
-  messageTimeReceived: {
-    marginLeft: 4,
   },
   inputBar: {
     flexDirection: "row",

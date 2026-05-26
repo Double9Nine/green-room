@@ -1,6 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import Swipeable from "react-native-gesture-handler/Swipeable";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
   Children,
@@ -13,6 +16,7 @@ import {
 } from "react";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -72,6 +76,7 @@ const ACCENT_DARK = "#15803d";
 
 const MY_EVENTS_KEY = "myEvents";
 const JOINED_EVENTS_KEY = "joinedEvents";
+const LIKED_EVENTS_KEY = "likedEvents";
 
 const EVENT_TYPES = [
   "Casual Match",
@@ -82,7 +87,7 @@ const EVENT_TYPES = [
   "Open Session",
 ] as const;
 
-const SORT_OPTIONS = ["Latest", "Nearest", "Popular"] as const;
+const SORT_OPTIONS = ["Soonest", "Nearest", "Popular"] as const;
 
 const FILTER_SPORTS = [
   "All Sports",
@@ -154,6 +159,9 @@ export type PlazaEvent = {
   status?: string;
   attended?: boolean;
   attendanceAnswered?: boolean;
+  photo?: string | null;
+  lat?: number | null;
+  lng?: number | null;
 };
 
 type PlacePrediction = {
@@ -328,6 +336,25 @@ function PastEventCard({
   );
 }
 
+function renderPastRightActions(onDelete: () => void) {
+  return (
+    <Pressable
+      onPress={onDelete}
+      style={{
+        backgroundColor: "#dc2626",
+        justifyContent: "center",
+        alignItems: "center",
+        width: 80,
+        borderRadius: 12,
+        marginBottom: 8,
+      }}
+    >
+      <Ionicons name="trash-outline" size={22} color="#ffffff" />
+      <Text style={{ color: "#ffffff", fontSize: 12, marginTop: 4 }}>Delete</Text>
+    </Pressable>
+  );
+}
+
 function DismissableCard({
   event,
   badge,
@@ -446,6 +473,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 18,
     comments: 6,
     details: "Looking for a 3.5+ player for a friendly singles match.",
+    lat: 40.7829,
+    lng: -73.9654,
   }),
   withOrganizer({
     id: 2,
@@ -461,6 +490,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 24,
     comments: 9,
     details: "All levels welcome! Paddles provided.",
+    lat: 40.7794,
+    lng: -73.9632,
   }),
   withOrganizer({
     id: 3,
@@ -476,6 +507,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 12,
     comments: 4,
     details: "Looking for two more players for a fun doubles game.",
+    lat: 40.6782,
+    lng: -73.9442,
   }),
   withOrganizer({
     id: 4,
@@ -491,6 +524,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 31,
     comments: 11,
     details: "Easy pace group run. All levels welcome!",
+    lat: 40.7829,
+    lng: -73.9654,
   }),
   withOrganizer({
     id: 5,
@@ -506,6 +541,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 42,
     comments: 15,
     details: "Casual pickup game. Bring your own cleats.",
+    lat: 40.7549,
+    lng: -74.0019,
   }),
   withOrganizer({
     id: 6,
@@ -521,6 +558,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 28,
     comments: 8,
     details: "Competitive but friendly 3v3. All skill levels.",
+    lat: 40.8889,
+    lng: -73.8987,
   }),
   withOrganizer({
     id: 7,
@@ -536,6 +575,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 35,
     comments: 13,
     details: "Fun beach volleyball session. Beginners welcome!",
+    lat: 40.6892,
+    lng: -73.9442,
   }),
   withOrganizer({
     id: 8,
@@ -551,6 +592,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 12,
     comments: 4,
     details: "Relaxed game, all levels welcome. Shuttlecocks provided.",
+    lat: 40.7282,
+    lng: -74.0776,
   }),
   withOrganizer({
     id: 9,
@@ -566,6 +609,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 22,
     comments: 7,
     details: "Beginner to intermediate routes. Shoes available to rent.",
+    lat: 40.6892,
+    lng: -73.9442,
   }),
   withOrganizer({
     id: 10,
@@ -581,6 +626,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 19,
     comments: 5,
     details: "15-mile scenic ride along the Hudson. Moderate pace.",
+    lat: 40.7282,
+    lng: -74.0776,
   }),
   withOrganizer({
     id: 11,
@@ -596,6 +643,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 38,
     comments: 12,
     details: "Super fun and casual kickball game. No experience needed!",
+    lat: 40.7220,
+    lng: -73.9490,
   }),
   withOrganizer({
     id: 12,
@@ -611,6 +660,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 27,
     comments: 9,
     details: "Friendly co-ed softball. Gloves provided for those who need.",
+    lat: 40.7829,
+    lng: -73.9654,
   }),
   withOrganizer({
     id: 13,
@@ -626,6 +677,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 33,
     comments: 11,
     details: "7v7 flag football. All positions needed!",
+    lat: 40.7906,
+    lng: -73.9271,
   }),
   withOrganizer({
     id: 14,
@@ -641,6 +694,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 41,
     comments: 16,
     details: "Fun bowling night. Shoes included. Drinks optional!",
+    lat: 40.7549,
+    lng: -73.9840,
   }),
   withOrganizer({
     id: 15,
@@ -656,6 +711,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 16,
     comments: 6,
     details: "Round robin format. All skill levels. $5 entry.",
+    lat: 40.7282,
+    lng: -74.0052,
   }),
   withOrganizer({
     id: 16,
@@ -671,6 +728,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 55,
     comments: 22,
     details: "Meet fellow sports lovers over drinks. No equipment needed!",
+    lat: 40.7549,
+    lng: -73.9840,
   }),
   withOrganizer({
     id: 17,
@@ -686,6 +745,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 14,
     comments: 4,
     details: "Casual open water swim. Must be comfortable in open water.",
+    lat: 40.6782,
+    lng: -73.9442,
   }),
   withOrganizer({
     id: 18,
@@ -701,8 +762,27 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 21,
     comments: 7,
     details: "Ultimate frisbee casual game. No experience needed!",
+    lat: 40.6612,
+    lng: -73.9636,
   }),
   withOrganizer({
+    id: 96,
+    user: "Test Host 2",
+    organizer: "Test Host 2",
+    sport: "Tennis",
+    title: "Test Join Event - Past Flow",
+    location: "Central Park Tennis Courts, NY",
+    distance: "0.8 mi",
+    time: "2026-05-25T19:26:00",
+    spots: 3,
+    maxSpots: 4,
+    likes: 3,
+    comments: 1,
+    details: "Test event for joined past flow.",
+    lat: 40.7829,
+    lng: -73.9654,
+  },
+  {
     id: 97,
     user: "Test Host",
     sport: "Tennis",
@@ -715,6 +795,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 5,
     comments: 2,
     details: "Test event for member expiration flow.",
+    lat: 40.7829,
+    lng: -73.9654,
   }),
   withOrganizer({
     id: 98,
@@ -730,6 +812,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 5,
     comments: 2,
     details: "This is a past event for testing expired status.",
+    lat: 40.7829,
+    lng: -73.9654,
   }),
   withOrganizer({
     id: 99,
@@ -745,6 +829,8 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     likes: 52,
     comments: 18,
     details: "Competitive 5v5 full court game. All spots taken!",
+    lat: 40.7308,
+    lng: -73.9973,
   }),
 ];
 
@@ -760,6 +846,25 @@ function getInitials(name: string) {
 function parseDistanceMi(distance: string) {
   const n = parseFloat(distance.replace(/[^\d.]/g, ""));
   return Number.isNaN(n) ? 999 : n;
+}
+
+function getDistanceMiles(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
+  const R = 3958.8;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 function sportFromFilterLabel(label: string) {
@@ -811,6 +916,7 @@ type EventCardProps = {
   onOpenGroupChat?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onSendInChat?: () => void;
 };
 
 function stopCardPress(e: unknown) {
@@ -835,20 +941,30 @@ function EventCard({
   onOpenGroupChat,
   onEdit,
   onDelete,
+  onSendInChat,
 }: EventCardProps) {
   const placeholder =
     SPORT_PLACEHOLDER[event.sport] ?? SPORT_PLACEHOLDER.Tennis;
   const cardIsPressable =
     !!onCardPress && (mode === "joined" || mode === "my");
 
-  const handleShare = async () => {
-    try {
-      await Share.share({
-        message: `${event.title} — ${event.location} · ${formatEventTime(event.time)}`,
-      });
-    } catch {
-      /* user dismissed */
-    }
+  const handleShare = () => {
+    Alert.alert("Share Event", event.title, [
+      {
+        text: "Share via...",
+        onPress: () => {
+          void Share.share({
+            message: `Join me at ${event.title}!\n📍 ${event.location}\n🕐 ${formatEventTime(event.time)}\n👥 ${event.spots}/${event.maxSpots} spots left`,
+            title: event.title,
+          });
+        },
+      },
+      {
+        text: "Send in Chat",
+        onPress: () => onSendInChat?.(),
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
   };
 
   const cardBody = (
@@ -863,7 +979,6 @@ function EventCard({
             <Text style={styles.sportTagText}>{event.sport}</Text>
           </View>
         </View>
-        <Text style={styles.eventPostedAgo}>{event.postedAgo}</Text>
       </View>
 
       <Text style={styles.eventTitle}>{event.title}</Text>
@@ -898,7 +1013,15 @@ function EventCard({
         <View
           style={[styles.eventImagePlaceholder, { backgroundColor: placeholder.bg }]}
         >
-          <Text style={styles.eventImageEmoji}>{placeholder.emoji}</Text>
+          {event.photo ? (
+            <Image
+              source={{ uri: event.photo }}
+              style={{ width: "100%", height: "100%" }}
+              resizeMode="cover"
+            />
+          ) : (
+            <Text style={styles.eventImageEmoji}>{placeholder.emoji}</Text>
+          )}
         </View>
         <View
           style={[
@@ -928,20 +1051,22 @@ function EventCard({
             if (cardIsPressable) stopCardPress(e);
             onToggleLike();
           }}
-          style={styles.actionChip}
+          style={[styles.actionChip, { flexDirection: "row", alignItems: "center", gap: 4 }]}
           hitSlop={8}
         >
+          <Ionicons
+            name={liked ? "heart" : "heart-outline"}
+            size={20}
+            color={liked ? "#dc2626" : "#64748b"}
+          />
           <Text style={styles.actionChipText}>
-            {liked ? "❤️" : "🤍"} {event.likes + (liked ? 1 : 0)}
+            {event.likes + (liked ? 1 : 0)}
           </Text>
         </Pressable>
-        <View style={styles.actionChip}>
-          <Text style={styles.actionChipText}>💬 {event.comments}</Text>
-        </View>
         <Pressable
           onPress={(e) => {
             if (cardIsPressable) stopCardPress(e);
-            void handleShare();
+            handleShare();
           }}
           hitSlop={8}
         >
@@ -1032,7 +1157,7 @@ export default function ExploreScreen() {
   const [joinedBadge, setJoinedBadge] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedSport, setSelectedSport] = useState("All Sports");
-  const [sortBy, setSortBy] = useState<(typeof SORT_OPTIONS)[number]>("Latest");
+  const [sortBy, setSortBy] = useState<(typeof SORT_OPTIONS)[number]>("Soonest");
   const [myEvents, setMyEvents] = useState<PlazaEvent[]>([]);
   const [joinedIds, setJoinedIds] = useState<number[]>([]);
   const [likedIds, setLikedIds] = useState<Set<number>>(new Set());
@@ -1051,6 +1176,7 @@ export default function ExploreScreen() {
   const [createVisible, setCreateVisible] = useState(false);
   const [editingEvent, setEditingEvent] = useState<PlazaEvent | null>(null);
   const modalScrollRef = useRef<ScrollView>(null);
+  const discoverScrollRef = useRef<ScrollView>(null);
 
   const [formName, setFormName] = useState("");
   const [showEventTypeDropdown, setShowEventTypeDropdown] = useState(false);
@@ -1066,12 +1192,29 @@ export default function ExploreScreen() {
   );
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [details, setDetails] = useState("");
+  const [eventPhoto, setEventPhoto] = useState<string | null>(null);
+  const [eventLat, setEventLat] = useState<number | null>(null);
+  const [eventLng, setEventLng] = useState<number | null>(null);
+  const [userLat, setUserLat] = useState<number | null>(null);
+  const [userLng, setUserLng] = useState<number | null>(null);
+  const [conversations, setConversations] = useState<
+    Array<{
+      id: string;
+      playerName: string;
+      sportEmoji: string;
+      playerSkill: string;
+      playerLocation: string;
+      playerPurpose?: string;
+    }>
+  >([]);
+  const [shareModalEvent, setShareModalEvent] = useState<PlazaEvent | null>(null);
   const loadStorage = useCallback(async () => {
     try {
       await ensureDemoEventSeed();
-      const [myRaw, joinedRaw, requests, pending, members] = await Promise.all([
+      const [myRaw, joinedRaw, likedRaw, requests, pending, members] = await Promise.all([
         AsyncStorage.getItem(MY_EVENTS_KEY),
         AsyncStorage.getItem(JOINED_EVENTS_KEY),
+        AsyncStorage.getItem(LIKED_EVENTS_KEY),
         loadEventRequests(),
         loadPendingRequests(),
         loadEventMembers(),
@@ -1079,6 +1222,10 @@ export default function ExploreScreen() {
       if (myRaw) {
         const parsed = JSON.parse(myRaw) as PlazaEvent[];
         setMyEvents(Array.isArray(parsed) ? parsed : []);
+      }
+      if (likedRaw) {
+        const parsedLiked = JSON.parse(likedRaw) as number[];
+        setLikedIds(new Set(Array.isArray(parsedLiked) ? parsedLiked : []));
       }
       // Legacy instant-join IDs are no longer used; Joined tab uses confirmed requests only.
       if (joinedRaw) {
@@ -1318,6 +1465,24 @@ export default function ExploreScreen() {
       void loadJoinedRequests();
       void checkExpiredEvents();
 
+      AsyncStorage.getItem("conversations").then((raw) => {
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as Array<{
+              id: string;
+              playerName: string;
+              sportEmoji: string;
+              playerSkill: string;
+              playerLocation: string;
+              playerPurpose?: string;
+            }>;
+            setConversations(Array.isArray(parsed) ? parsed : []);
+          } catch {
+            /* ignore malformed data */
+          }
+        }
+      });
+
       const loadBadges = async () => {
         const pending = await getPendingRequestsCount();
         const status = await getJoinedStatusChangesCount();
@@ -1335,6 +1500,14 @@ export default function ExploreScreen() {
     }, 60 * 1000);
     return () => clearInterval(interval);
   }, [checkExpiredEvents]);
+
+  useEffect(() => {
+    discoverScrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, [sortBy]);
+
+  useEffect(() => {
+    discoverScrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, [selectedSport]);
 
   const switchSubTab = useCallback((tab: SubTab) => {
     setSubTab(tab);
@@ -1382,17 +1555,42 @@ export default function ExploreScreen() {
     if (sport) {
       list = list.filter((e) => e.sport === sport);
     }
-    if (sortBy === "Latest") {
-      list.sort((a, b) => b.id - a.id);
+    if (sortBy === "Soonest") {
+      list.sort((a, b) => {
+        const timeA = new Date(a.time).getTime();
+        const timeB = new Date(b.time).getTime();
+        if (isNaN(timeA) && isNaN(timeB)) return 0;
+        if (isNaN(timeA)) return 1;
+        if (isNaN(timeB)) return -1;
+        return timeA - timeB;
+      });
     } else if (sortBy === "Nearest") {
-      list.sort(
-        (a, b) => parseDistanceMi(a.distance) - parseDistanceMi(b.distance)
-      );
+      if (userLat !== null && userLng !== null) {
+        list.sort((a, b) => {
+          const distA =
+            a.lat != null && a.lng != null
+              ? getDistanceMiles(userLat, userLng, a.lat, a.lng)
+              : 999;
+          const distB =
+            b.lat != null && b.lng != null
+              ? getDistanceMiles(userLat, userLng, b.lat, b.lng)
+              : 999;
+          return distA - distB;
+        });
+      } else {
+        list.sort(
+          (a, b) => parseDistanceMi(a.distance) - parseDistanceMi(b.distance)
+        );
+      }
     } else {
-      list.sort((a, b) => b.likes - a.likes);
+      list.sort((a, b) => {
+        const aLikes = likedIds.has(a.id) ? a.likes + 1 : a.likes;
+        const bLikes = likedIds.has(b.id) ? b.likes + 1 : b.likes;
+        return bLikes - aLikes;
+      });
     }
     return list;
-  }, [allDiscoverEvents, selectedSport, sortBy]);
+  }, [allDiscoverEvents, selectedSport, sortBy, likedIds, userLat, userLng]);
 
   const fetchLocationSuggestions = async (input: string) => {
     if (input.length < 3) {
@@ -1420,6 +1618,64 @@ export default function ExploreScreen() {
     } catch {}
   };
 
+  const handleSelectLocation = async (suggestion: PlacePrediction) => {
+    setLocation(suggestion.description);
+    setShowSuggestions(false);
+    setLocationSuggestions([]);
+    try {
+      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_KEY;
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${suggestion.place_id}&fields=geometry&key=${apiKey ?? ""}`
+      );
+      const data = (await response.json()) as {
+        result?: { geometry?: { location?: { lat?: number; lng?: number } } };
+      };
+      const lat = data.result?.geometry?.location?.lat;
+      const lng = data.result?.geometry?.location?.lng;
+      if (lat != null && lng != null) {
+        setEventLat(lat);
+        setEventLng(lng);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleNearestSort = async () => {
+    setSortBy("Nearest");
+    if (userLat !== null && userLng !== null) return;
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          "Location needed",
+          "Enable location to sort by nearest events"
+        );
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      setUserLat(loc.coords.latitude);
+      setUserLng(loc.coords.longitude);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const getDisplayDistance = (event: PlazaEvent): string => {
+    if (
+      userLat === null ||
+      userLng === null ||
+      event.lat == null ||
+      event.lng == null
+    ) {
+      return event.distance ?? "";
+    }
+    const miles = getDistanceMiles(userLat, userLng, event.lat, event.lng);
+    return `${miles.toFixed(1)} mi`;
+  };
+
   const resetForm = () => {
     setFormName("");
     setEventType("");
@@ -1431,9 +1687,63 @@ export default function ExploreScreen() {
     setLocationSuggestions([]);
     setShowSuggestions(false);
     setDetails("");
+    setEventPhoto(null);
+    setEventLat(null);
+    setEventLng(null);
     setShowEventTypeDropdown(false);
     setShowSportDropdown(false);
     setEditingEvent(null);
+  };
+
+  const pickEventPhoto = async () => {
+    Alert.alert("Add Event Photo", "Choose a photo for your event", [
+      {
+        text: "Take Photo",
+        onPress: async () => {
+          const permission = await ImagePicker.requestCameraPermissionsAsync();
+          if (!permission.granted) {
+            Alert.alert(
+              "Permission needed",
+              "Enable camera access in Settings"
+            );
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            quality: 0.85,
+            allowsEditing: true,
+            aspect: [4, 3],
+          });
+          if (!result.canceled && result.assets[0]?.uri) {
+            setEventPhoto(result.assets[0].uri);
+          }
+        },
+      },
+      {
+        text: "Choose from Library",
+        onPress: async () => {
+          const permission =
+            await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (!permission.granted) {
+            Alert.alert(
+              "Permission needed",
+              "Enable photo access in Settings"
+            );
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            quality: 0.85,
+            allowsEditing: true,
+            aspect: [4, 3],
+          });
+          if (!result.canceled && result.assets[0]?.uri) {
+            setEventPhoto(result.assets[0].uri);
+          }
+        },
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
   };
 
   const openCreateModal = () => {
@@ -1535,10 +1845,16 @@ export default function ExploreScreen() {
       details: details.trim(),
       dateLabel: dateStr,
       timeLabel: timeStr,
+      photo: eventPhoto || null,
+      lat: eventLat,
+      lng: eventLng,
     };
 
     await persistMyEvents([newEvent, ...myEvents]);
     await refreshRequestData();
+    setEventPhoto(null);
+    setEventLat(null);
+    setEventLng(null);
     closeModal();
     setSubTab("my");
   };
@@ -1684,6 +2000,48 @@ export default function ExploreScreen() {
     await refreshRequestData();
   };
 
+  const handleDeletePastMyEvent = (eventId: number) => {
+    Alert.alert(
+      "Delete Record",
+      "Remove this event from your history? Your games played count will not change.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const raw = await AsyncStorage.getItem(MY_EVENTS_KEY);
+            const all: PlazaEvent[] = raw ? (JSON.parse(raw) as PlazaEvent[]) : [];
+            const updated = all.filter((e) => e.id !== eventId);
+            await AsyncStorage.setItem(MY_EVENTS_KEY, JSON.stringify(updated));
+            setMyEvents(updated);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeletePastJoined = (eventId: number) => {
+    Alert.alert(
+      "Delete Record",
+      "Remove this event from your history? Your games played count will not change.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const raw = await AsyncStorage.getItem(EVENT_REQUESTS_KEY);
+            const all: EventRequest[] = raw ? (JSON.parse(raw) as EventRequest[]) : [];
+            const updated = all.filter((r) => r.eventId !== eventId);
+            await AsyncStorage.setItem(EVENT_REQUESTS_KEY, JSON.stringify(updated));
+            setPastJoined((prev) => prev.filter((r) => r.eventId !== eventId));
+          },
+        },
+      ]
+    );
+  };
+
   const handleDismiss = useCallback(
     async (eventId: number, status: string) => {
       const raw = await AsyncStorage.getItem(EVENT_REQUESTS_KEY);
@@ -1816,6 +2174,7 @@ export default function ExploreScreen() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      void AsyncStorage.setItem(LIKED_EVENTS_KEY, JSON.stringify([...next]));
       return next;
     });
   };
@@ -1844,7 +2203,11 @@ export default function ExploreScreen() {
             return (
               <Pressable
                 key={opt}
-                onPress={() => setSortBy(opt)}
+                onPress={
+                  opt === "Nearest"
+                    ? () => void handleNearestSort()
+                    : () => setSortBy(opt)
+                }
                 style={[styles.sortChip, active && styles.sortChipActive]}
               >
                 <Text
@@ -1859,6 +2222,7 @@ export default function ExploreScreen() {
       </View>
 
       <ScrollView
+        ref={discoverScrollRef}
         style={styles.tabScroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
@@ -1866,7 +2230,7 @@ export default function ExploreScreen() {
         {filteredDiscover.map((event) => (
           <EventCard
             key={event.id}
-            event={event}
+            event={{ ...event, distance: getDisplayDistance(event) }}
             mode="discover"
             joined={getRequestStatus(event.id) === "confirmed"}
             liked={likedIds.has(event.id)}
@@ -1875,6 +2239,7 @@ export default function ExploreScreen() {
             onJoin={() => {}}
             onUnjoin={() => void handleUnjoin(event.id)}
             onEventDetails={() => openEventDetails(event)}
+            onSendInChat={() => setShareModalEvent(event)}
           />
         ))}
       </ScrollView>
@@ -1931,6 +2296,7 @@ export default function ExploreScreen() {
                   onManageRequests={() => setRequestsModalEvent(merged)}
                   onEdit={() => openEditModal(merged)}
                   onDelete={() => handleDelete(merged)}
+                  onSendInChat={() => setShareModalEvent(merged)}
                 />
               );
             })
@@ -1947,14 +2313,21 @@ export default function ExploreScreen() {
             const merged =
               allDiscoverEvents.find((e) => e.id === event.id) ?? event;
             return (
-              <PastEventCard
+              <Swipeable
                 key={`past-my-${event.id}`}
-                event={merged}
-                badge="✅ Hosted · +1 Game"
-                badgeColor="#dcfce7"
-                badgeTextColor={ACCENT_DARK}
-                onPress={() => openEventDetails(merged)}
-              />
+                renderRightActions={() =>
+                  renderPastRightActions(() => handleDeletePastMyEvent(merged.id))
+                }
+                overshootRight={false}
+              >
+                <PastEventCard
+                  event={merged}
+                  badge="✅ Hosted · +1 Game"
+                  badgeColor="#dcfce7"
+                  badgeTextColor={ACCENT_DARK}
+                  onPress={() => openEventDetails(merged)}
+                />
+              </Swipeable>
             );
           })}
         </CollapsibleSection>
@@ -1989,6 +2362,7 @@ export default function ExploreScreen() {
                   onJoin={() => {}}
                   onCardPress={() => openEventDetails(event, true)}
                   onUnjoin={() => {}}
+                  onSendInChat={() => setShareModalEvent(event)}
                 />
               </View>
             );
@@ -2026,14 +2400,21 @@ export default function ExploreScreen() {
             const event = resolvePlazaEventFromRequest(req, allDiscoverEvents);
             if (!event) return null;
             return (
-              <PastEventCard
+              <Swipeable
                 key={`past-joined-${req.eventId}`}
-                event={event}
-                badge="✅ Attended · +1 Game"
-                badgeColor="#dcfce7"
-                badgeTextColor={ACCENT_DARK}
-                onPress={() => openEventDetails(event, true)}
-              />
+                renderRightActions={() =>
+                  renderPastRightActions(() => handleDeletePastJoined(req.eventId))
+                }
+                overshootRight={false}
+              >
+                <PastEventCard
+                  event={event}
+                  badge="✅ Attended · +1 Game"
+                  badgeColor="#dcfce7"
+                  badgeTextColor={ACCENT_DARK}
+                  onPress={() => openEventDetails(event, true)}
+                />
+              </Swipeable>
             );
           })}
         </CollapsibleSection>
@@ -2356,8 +2737,65 @@ export default function ExploreScreen() {
                 ]}
               >
               <Text style={[styles.fieldLabel, styles.fieldLabelFirst]}>
-                Event Name
+                Event Photo (Optional)
               </Text>
+              <Pressable
+                onPress={pickEventPhoto}
+                style={{
+                  width: "100%",
+                  aspectRatio: 4 / 3,
+                  borderRadius: 16,
+                  borderWidth: 1.5,
+                  borderColor: "#e2e8f0",
+                  borderStyle: "dashed",
+                  overflow: "hidden",
+                  marginBottom: 12,
+                }}
+              >
+                {eventPhoto ? (
+                  <Image
+                    source={{ uri: eventPhoto }}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View
+                    style={{
+                      flex: 1,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      backgroundColor: "#f8fafc",
+                    }}
+                  >
+                    <Ionicons name="camera-outline" size={32} color="#94a3b8" />
+                    <Text style={{ color: "#94a3b8", fontSize: 14 }}>
+                      Add a photo
+                    </Text>
+                    <Text style={{ color: "#cbd5e1", fontSize: 12 }}>
+                      Tap to take photo or choose from library
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+
+              {eventPhoto ? (
+                <Pressable onPress={() => setEventPhoto(null)}>
+                  <Text
+                    style={{
+                      color: "#dc2626",
+                      fontSize: 13,
+                      fontWeight: "600",
+                      textAlign: "center",
+                      marginBottom: 8,
+                    }}
+                  >
+                    Remove photo
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <Text style={styles.fieldLabel}>Event Name</Text>
               <TextInput
                 value={formName}
                 onChangeText={setFormName}
@@ -2474,11 +2912,7 @@ export default function ExploreScreen() {
                     {locationSuggestions.map((suggestion) => (
                       <Pressable
                         key={suggestion.place_id}
-                        onPress={() => {
-                          setLocation(suggestion.description);
-                          setShowSuggestions(false);
-                          setLocationSuggestions([]);
-                        }}
+                        onPress={() => void handleSelectLocation(suggestion)}
                         style={styles.locationSuggestionRow}
                       >
                         <Ionicons
@@ -2546,6 +2980,82 @@ export default function ExploreScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={shareModalEvent !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShareModalEvent(null)}
+      >
+        <Pressable
+          style={{ flex: 1 }}
+          onPress={() => setShareModalEvent(null)}
+        />
+        <View style={styles.shareModalSheet}>
+          <Text style={styles.shareModalTitle}>Send to...</Text>
+
+          <View style={styles.shareModalEventPreview}>
+            <Text style={styles.shareModalEventName}>
+              {shareModalEvent?.title}
+            </Text>
+            <Text style={styles.shareModalEventMeta}>
+              {shareModalEvent?.sport} · {shareModalEvent?.location}
+            </Text>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {conversations.length === 0 ? (
+              <Text style={styles.shareModalNoConvos}>
+                No conversations yet. Match with players to start chatting!
+              </Text>
+            ) : (
+              conversations.map((convo) => (
+                <Pressable
+                  key={convo.id}
+                  onPress={() => {
+                    const ev = shareModalEvent;
+                    setShareModalEvent(null);
+                    router.push({
+                      pathname: "/chat-conversation",
+                      params: {
+                        playerName: convo.playerName,
+                        sportEmoji: convo.sportEmoji,
+                        playerId: convo.id,
+                        playerSkill: convo.playerSkill ?? "",
+                        playerLocation: convo.playerLocation ?? "",
+                        playerPurpose: convo.playerPurpose ?? "",
+                        shareEvent: JSON.stringify(ev),
+                      },
+                    });
+                  }}
+                  style={styles.shareModalConvoRow}
+                >
+                  <View style={styles.shareModalAvatar}>
+                    <Text style={styles.shareModalAvatarText}>
+                      {convo.playerName[0]?.toUpperCase() ?? "?"}
+                    </Text>
+                  </View>
+                  <View>
+                    <Text style={styles.shareModalConvoName}>
+                      {convo.playerName}
+                    </Text>
+                    <Text style={styles.shareModalConvoSport}>
+                      {convo.sportEmoji} {convo.playerSkill}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))
+            )}
+          </ScrollView>
+
+          <Pressable
+            onPress={() => setShareModalEvent(null)}
+            style={styles.shareModalCancel}
+          >
+            <Text style={styles.shareModalCancelText}>Cancel</Text>
+          </Pressable>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -3259,10 +3769,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   eventImagePlaceholder: {
-    height: 160,
+    width: "100%",
+    aspectRatio: 4 / 3,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
   eventImageEmoji: {
     fontSize: 56,
@@ -3691,5 +4203,81 @@ const styles = StyleSheet.create({
     color: "#dc2626",
     fontSize: 14,
     fontWeight: "800",
+  },
+  shareModalSheet: {
+    backgroundColor: WHITE,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    maxHeight: "70%",
+  },
+  shareModalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: TEXT,
+    marginBottom: 4,
+  },
+  shareModalEventPreview: {
+    backgroundColor: BG,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  shareModalEventName: {
+    fontWeight: "700",
+    color: TEXT,
+    fontSize: 15,
+  },
+  shareModalEventMeta: {
+    color: MUTED,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  shareModalConvoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 14,
+    borderBottomWidth: 0.5,
+    borderBottomColor: BORDER,
+  },
+  shareModalAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: ACCENT_DARK,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shareModalAvatarText: {
+    color: WHITE,
+    fontWeight: "800",
+    fontSize: 16,
+  },
+  shareModalConvoName: {
+    fontWeight: "700",
+    fontSize: 16,
+    color: TEXT,
+  },
+  shareModalConvoSport: {
+    color: MUTED,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  shareModalNoConvos: {
+    color: MUTED,
+    fontSize: 14,
+    textAlign: "center",
+    paddingVertical: 24,
+  },
+  shareModalCancel: {
+    paddingVertical: 16,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  shareModalCancelText: {
+    color: "#dc2626",
+    fontWeight: "700",
+    fontSize: 16,
   },
 });

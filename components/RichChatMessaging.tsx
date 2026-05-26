@@ -50,17 +50,21 @@ export function getSheetActions(msg: GroupChatMessage): SheetAction[] {
   if (msg.sent) {
     if (msg.type === "voice") {
       return [
-        { key: "convert", label: "Convert to Text", tone: "primary" },
         { key: "recall", label: "Recall", tone: "destructive" },
+        { key: "delete", label: "Delete", tone: "destructive" },
+        { key: "convert", label: "Convert to Text", tone: "primary" },
       ];
     }
-    return [{ key: "recall", label: "Recall", tone: "destructive" }];
+    return [
+      { key: "recall", label: "Recall", tone: "destructive" },
+      { key: "delete", label: "Delete", tone: "destructive" },
+    ];
   }
 
   if (msg.type === "voice") {
     return [
-      { key: "convert", label: "Convert to Text", tone: "primary" },
       { key: "delete", label: "Delete", tone: "destructive" },
+      { key: "convert", label: "Convert to Text", tone: "primary" },
     ];
   }
 
@@ -365,7 +369,9 @@ export const richStyles = StyleSheet.create({
   },
   bubbleText: {
     fontSize: 16,
-    lineHeight: 21,
+    lineHeight: 22,
+    flexWrap: "wrap",
+    flexShrink: 1,
   },
   bubbleTextSent: {
     color: "#ffffff",

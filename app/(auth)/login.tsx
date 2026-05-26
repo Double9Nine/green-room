@@ -31,7 +31,7 @@ export default function LoginScreen() {
       return;
     }
     setError("");
-    router.push("/(tabs)/match");
+    router.replace("/(tabs)/match");
   };
 
   return (

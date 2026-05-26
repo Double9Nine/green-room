@@ -190,6 +190,7 @@ export default function ProfileScreen() {
   const [photo, setPhoto] = useState<string | null>(null);
   const [location, setLocation] = useState("");
   const [activeModal, setActiveModal] = useState<ModalKind>(null);
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
 
   const [draftName, setDraftName] = useState("");
   const [draftSport, setDraftSport] = useState("tennis");
@@ -395,18 +396,17 @@ export default function ProfileScreen() {
         <View style={styles.heroCard}>
           <View style={styles.heroCardRow}>
           <View style={styles.heroAvatarColumn}>
-            <Pressable onPress={pickPhoto} style={styles.avatarWrap}>
-              <View style={styles.avatarRing}>
-                {photo ? (
-                  <Image source={{ uri: photo }} style={styles.avatarImage} />
-                ) : (
-                  <Ionicons name="person" size={40} color={ACCENT_DARK} />
-                )}
-              </View>
-              <View style={styles.cameraBadge}>
-                <Ionicons name="camera" size={14} color={WHITE} />
-              </View>
-            </Pressable>
+            <View style={styles.avatarWrap}>
+              <Pressable onPress={() => setShowPhotoModal(true)}>
+                <View style={styles.avatarRing}>
+                  {photo ? (
+                    <Image source={{ uri: photo }} style={styles.avatarImage} />
+                  ) : (
+                    <Ionicons name="person" size={40} color={ACCENT_DARK} />
+                  )}
+                </View>
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.heroText}>
@@ -592,6 +592,46 @@ export default function ProfileScreen() {
           <Text style={{ fontSize: 20 }}>🌟</Text>
         </Pressable>
       </ScrollView>
+
+      <Modal
+        visible={showPhotoModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowPhotoModal(false)}
+      >
+        <Pressable
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.9)",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onPress={() => setShowPhotoModal(false)}
+        >
+          {photo ? (
+            <Image
+              source={{ uri: photo }}
+              style={{ width: 280, height: 280, borderRadius: 140, borderWidth: 3, borderColor: "#d4af37" }}
+              resizeMode="contain"
+            />
+          ) : (
+            <View
+              style={{
+                width: 200,
+                height: 200,
+                borderRadius: 100,
+                backgroundColor: "#15803d",
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 3,
+                borderColor: "#d4af37",
+              }}
+            >
+              <Ionicons name="person" size={100} color="#ffffff" />
+            </View>
+          )}
+        </Pressable>
+      </Modal>
 
       <SheetModal
         visible={activeModal === "name"}

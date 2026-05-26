@@ -1,20 +1,61 @@
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { LocationPicker } from "@/components/LocationPicker";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { mergeUserProfile } from "@/lib/profileStorage";
 
 export default function AdditionalInfoScreen() {
+  const insets = useSafeAreaInsets();
   const [occupation, setOccupation] = useState("");
   const [university, setUniversity] = useState("");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [locationLabel, setLocationLabel] = useState("");
+  const [photoError, setPhotoError] = useState(false);
+
+  const handleContinue = () => {
+    if (!photoUri) {
+      setPhotoError(true);
+      Alert.alert(
+        "Photo Required",
+        "Please upload a profile photo to continue.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
+    void mergeUserProfile({
+      work: occupation.trim(),
+      university: university.trim(),
+      photo: photoUri,
+      location: locationLabel,
+    });
+    void AsyncStorage.removeItem("tempProfile");
+    router.replace("/(tabs)/match");
+  };
 
   return (
     <LinearGradient colors={["#22c55e", "#16a34a"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.screen}>
+      <Pressable
+        onPress={async () => {
+          await AsyncStorage.setItem("fromAdditionalInfo", "true");
+          router.back();
+        }}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 16,
+          paddingTop: insets.top + 8,
+          paddingBottom: 8,
+        }}
+      >
+        <Ionicons name="chevron-back" size={24} color="#15803d" />
+        <Text style={{ color: "#15803d", fontSize: 16, fontWeight: "600" }}>Back</Text>
+      </Pressable>
       <ScrollView contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Additional Information</Text>
         <Text style={styles.subtitle}>Help others get to know you better (optional)</Text>
@@ -44,14 +85,34 @@ export default function AdditionalInfoScreen() {
         </View>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Add a photo (optional)</Text>
-          <View style={styles.card}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <Text style={styles.label}>Profile Photo</Text>
+            <Text style={{ color: "#dc2626", fontSize: 16, fontWeight: "800" }}>*</Text>
+          </View>
+          <Text style={{ color: "#64748b", fontSize: 13, marginTop: -4 }}>
+            Required - help others recognize you!
+          </Text>
+          <View
+            style={[
+              styles.card,
+              {
+                borderColor: photoError ? "#dc2626" : "rgba(20,83,45,0.18)",
+                borderWidth: photoError ? 2 : 1,
+              },
+            ]}
+          >
             <View style={styles.cardHeader}>
               <Text style={styles.cardIcon}>📷</Text>
               <Text style={styles.cardTitle}>Profile Photo</Text>
             </View>
 
-            <PhotoPicker value={photoUri} onChange={setPhotoUri} />
+            <PhotoPicker
+              value={photoUri}
+              onChange={(uri) => {
+                setPhotoUri(uri);
+                if (uri) setPhotoError(false);
+              }}
+            />
 
             <Text style={styles.helperText}>Upload a photo to help others recognize you</Text>
           </View>
@@ -62,15 +123,7 @@ export default function AdditionalInfoScreen() {
         </View>
 
         <Pressable
-          onPress={() => {
-            void mergeUserProfile({
-              work: occupation.trim(),
-              university: university.trim(),
-              photo: photoUri,
-              location: locationLabel,
-            });
-            router.push("/(tabs)/match");
-          }}
+          onPress={handleContinue}
           style={({ pressed }) => [styles.completeButton, pressed && styles.actionButtonPressed]}
         >
           <Text style={styles.completeButtonText}>Complete Profile</Text>

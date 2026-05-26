@@ -1,7 +1,10 @@
+import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
-import { useMemo, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { mergeUserProfile } from "@/lib/profileStorage";
 import {
@@ -34,6 +37,7 @@ function formatDate(date: Date): string {
 }
 
 export default function CreateProfileScreen() {
+  const insets = useSafeAreaInsets();
   const maxAllowedDob = useMemo(() => getMaxAllowedDob(), []);
   const [fullName, setFullName] = useState("");
   const [gender, setGender] = useState<GenderOption | null>(null);
@@ -41,6 +45,36 @@ export default function CreateProfileScreen() {
   const [showDatePicker, setShowDatePicker] = useState(Platform.OS === "ios");
   const [formError, setFormError] = useState("");
   const [dobError, setDobError] = useState("");
+
+  useFocusEffect(
+    useCallback(() => {
+      void AsyncStorage.getItem("fromAdditionalInfo").then(async (val) => {
+        if (val === "true") {
+          await AsyncStorage.removeItem("fromAdditionalInfo");
+          const raw = await AsyncStorage.getItem("tempProfile");
+          if (raw) {
+            try {
+              const saved = JSON.parse(raw) as {
+                name?: string;
+                gender?: string;
+                dob?: string;
+              };
+              if (saved.name) setFullName(saved.name);
+              if (saved.gender) setGender(saved.gender as GenderOption);
+              if (saved.dob) setDateOfBirth(new Date(saved.dob));
+            } catch {
+              /* ignore corrupt data */
+            }
+          }
+        } else {
+          setFullName("");
+          setGender(null);
+          setDateOfBirth(maxAllowedDob);
+          void AsyncStorage.removeItem("tempProfile");
+        }
+      });
+    }, [maxAllowedDob])
+  );
 
   const onDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     if (Platform.OS === "android") {
@@ -83,11 +117,32 @@ export default function CreateProfileScreen() {
     void mergeUserProfile({
       name: fullName.trim(),
     });
+    void AsyncStorage.setItem(
+      "tempProfile",
+      JSON.stringify({
+        name: fullName.trim(),
+        gender,
+        dob: dateOfBirth.toISOString(),
+      })
+    );
     router.push("/(auth)/additional-info" as never);
   };
 
   return (
     <LinearGradient colors={["#22c55e", "#16a34a"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.screen}>
+      <Pressable
+        onPress={() => router.back()}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 16,
+          paddingTop: insets.top + 8,
+          paddingBottom: 8,
+        }}
+      >
+        <Ionicons name="chevron-back" size={24} color="#15803d" />
+        <Text style={{ color: "#15803d", fontSize: 16, fontWeight: "600" }}>Back</Text>
+      </Pressable>
       <ScrollView contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Create Your Profile</Text>
 

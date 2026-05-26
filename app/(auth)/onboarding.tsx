@@ -52,7 +52,7 @@ export default function OnboardingScreen() {
       title: "Set Up Your Profile",
       subtitle: "Tell us your sport, skill level and location to start matching",
       cta: "Create Profile",
-      onPress: () => router.push("/(auth)/create-profile" as never),
+      onPress: () => router.replace("/(auth)/create-profile" as never),
     },
   ];
 

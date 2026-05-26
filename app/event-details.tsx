@@ -97,9 +97,31 @@ function getInitials(name: string) {
 
 function isEventExpired(event: { time?: string } | null | undefined): boolean {
   if (!event?.time) return false;
-  const t = new Date(event.time).getTime();
-  if (isNaN(t)) return false;
-  return t < Date.now();
+  const direct = new Date(event.time).getTime();
+  if (!isNaN(direct)) return direct < Date.now();
+
+  const MONTHS: Record<string, number> = {
+    Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+    Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
+  };
+  const match = event.time.match(
+    /^(\w+),\s+(\w+)\s+(\d+),\s+(\d+):(\d+)$/
+  );
+  if (match) {
+    const month = MONTHS[match[2]];
+    if (month !== undefined) {
+      const d = new Date(
+        new Date().getFullYear(),
+        month,
+        parseInt(match[3]),
+        parseInt(match[4]),
+        parseInt(match[5]),
+        0
+      );
+      return d.getTime() < Date.now();
+    }
+  }
+  return false;
 }
 
 export default function EventDetailsScreen() {
@@ -192,6 +214,10 @@ export default function EventDetailsScreen() {
     : false;
 
   const cannotJoin = isOrganizer ? false : (event?.spots ?? 0) >= maxSpots;
+
+  const isPastEvent = event
+    ? isEventExpired(event) || (event as unknown as { status?: string }).status === "past"
+    : false;
 
   const validMembers = useMemo(
     () =>
@@ -538,7 +564,7 @@ export default function EventDetailsScreen() {
           ) : null}
         </View>
 
-        {__DEV__ && isOrganizer && event && event.id ? (
+        {!isPastEvent && __DEV__ && isOrganizer && event && event.id ? (
           <Pressable
             onPress={async () => {
               if (!event) return;
@@ -590,7 +616,7 @@ export default function EventDetailsScreen() {
           </Pressable>
         ) : null}
 
-        {__DEV__ && myStatus === "pending" && (
+        {!isPastEvent && __DEV__ && myStatus === "pending" && (
           <>
             <Pressable
               onPress={async () => {
@@ -671,7 +697,7 @@ export default function EventDetailsScreen() {
           </>
         )}
 
-        {__DEV__ && myStatus === "confirmed" && !isOrganizer ? (
+        {!isPastEvent && __DEV__ && myStatus === "confirmed" && !isOrganizer ? (
           <Pressable
             onPress={async () => {
               const user = await getCurrentUser();
@@ -749,21 +775,37 @@ export default function EventDetailsScreen() {
                   <Text style={styles.hostedBy}>Hosted by {organizerName}</Text>
                 </View>
               </View>
-              <View
-                style={[
-                  styles.statusPill,
-                  isFull ? styles.statusPillFull : styles.statusPillOpen,
-                ]}
-              >
-                <Text
+              {isPastEvent ? (
+                <View
+                  style={{
+                    backgroundColor: "#f1f5f9",
+                    borderRadius: 8,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    alignSelf: "flex-start",
+                  }}
+                >
+                  <Text style={{ color: "#64748b", fontWeight: "700", fontSize: 13 }}>
+                    📅 Event Ended
+                  </Text>
+                </View>
+              ) : (
+                <View
                   style={[
-                    styles.statusPillText,
-                    isFull ? styles.statusPillTextFull : styles.statusPillTextOpen,
+                    styles.statusPill,
+                    isFull ? styles.statusPillFull : styles.statusPillOpen,
                   ]}
                 >
-                  {isFull ? "Event Full" : "Open"}
-                </Text>
-              </View>
+                  <Text
+                    style={[
+                      styles.statusPillText,
+                      isFull ? styles.statusPillTextFull : styles.statusPillTextOpen,
+                    ]}
+                  >
+                    {isFull ? "Event Full" : "Open"}
+                  </Text>
+                </View>
+              )}
             </View>
 
             {event.details ? (
@@ -791,7 +833,7 @@ export default function EventDetailsScreen() {
             </View>
           </View>
 
-          {showOrganizerPreview ? (
+          {!isPastEvent && showOrganizerPreview ? (
             <>
               <Pressable
                 onPress={openOrganizerProfile}
@@ -821,7 +863,7 @@ export default function EventDetailsScreen() {
             </>
           ) : null}
 
-          {!showOrganizerPreview && !isHost && myStatus === "rejected" ? (
+          {!isPastEvent && !showOrganizerPreview && !isHost && myStatus === "rejected" ? (
             <Pressable
               onPress={openMessageOrganizer}
               style={styles.messageOrganizerBtnLarge}
@@ -832,7 +874,7 @@ export default function EventDetailsScreen() {
             </Pressable>
           ) : null}
 
-          {showMemberList ? (
+          {!isPastEvent && showMemberList ? (
             <>
               {showGroupChatButton ? (
                 <Pressable
@@ -915,7 +957,7 @@ export default function EventDetailsScreen() {
             </>
           ) : null}
 
-          {showMembersAndChat ? (
+          {!isPastEvent && showMembersAndChat ? (
             <>
               <Text style={styles.sectionTitle}>Group Chat</Text>
               <View style={styles.chatCard}>
@@ -974,7 +1016,21 @@ export default function EventDetailsScreen() {
             { paddingBottom: Math.max(insets.bottom, 16) },
           ]}
         >
-          {renderBottomBar()}
+          {isPastEvent ? (
+            <Text
+              style={{
+                color: "#94a3b8",
+                textAlign: "center",
+                fontSize: 14,
+                fontStyle: "italic",
+                marginTop: 16,
+              }}
+            >
+              This event has already taken place.
+            </Text>
+          ) : (
+            renderBottomBar()
+          )}
         </View>
 
         {toast ? (

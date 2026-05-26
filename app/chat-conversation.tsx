@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -32,6 +32,8 @@ import type { VenueSharePayload } from "@/constants/nearbyVenues";
 import { CONVERSATIONS_STORAGE_KEY } from "@/lib/conversationsStorage";
 import { convertVoiceToText } from "@/lib/convertVoiceToText";
 import { incrementUnreadPrivate } from "@/lib/notificationStore";
+import { formatEventTime } from "./(tabs)/explore";
+import { getCurrentUser } from "../lib/getCurrentUser";
 
 const DARK_GREEN = "#052e16";
 const ACCENT_GREEN = "#15803d";
@@ -45,7 +47,8 @@ type MessageType =
   | "image"
   | "location"
   | "voice"
-  | "venue";
+  | "venue"
+  | "sharedEvent";
 
 type ChatMessage = {
   id: string;
@@ -67,6 +70,14 @@ type ChatMessage = {
   venueRating?: string;
   venueAvailable?: string;
   venueUrl?: string;
+  sharedEventId?: number;
+  sharedEventTitle?: string;
+  sharedEventSport?: string;
+  sharedEventLocation?: string;
+  sharedEventTime?: string;
+  sharedEventSpots?: number;
+  sharedEventMaxSpots?: number;
+  sharedEventData?: string;
 };
 
 type SheetAction = {
@@ -113,6 +124,48 @@ function formatVoiceDuration(sec: number) {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function MessageAvatar({
+  name,
+  photo,
+  onPress,
+}: {
+  name: string;
+  photo?: string | null;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={{ marginHorizontal: 2 }}>
+      {photo ? (
+        <Image
+          source={{ uri: photo }}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            borderWidth: 1,
+            borderColor: "#e2e8f0",
+          }}
+        />
+      ) : (
+        <View
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            backgroundColor: "#15803d",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "800" }}>
+            {name?.[0]?.toUpperCase() ?? "?"}
+          </Text>
+        </View>
+      )}
+    </Pressable>
+  );
 }
 
 function VenueMessageBubble({ msg }: { msg: ChatMessage }) {
@@ -268,17 +321,21 @@ function getSheetActions(msg: ChatMessage): SheetAction[] {
   if (msg.sent) {
     if (msg.type === "voice") {
       return [
-        { key: "convert", label: "Convert to Text", tone: "primary" },
         { key: "recall", label: "Recall", tone: "destructive" },
+        { key: "delete", label: "Delete", tone: "destructive" },
+        { key: "convert", label: "Convert to Text", tone: "primary" },
       ];
     }
-    return [{ key: "recall", label: "Recall", tone: "destructive" }];
+    return [
+      { key: "recall", label: "Recall", tone: "destructive" },
+      { key: "delete", label: "Delete", tone: "destructive" },
+    ];
   }
 
   if (msg.type === "voice") {
     return [
-      { key: "convert", label: "Convert to Text", tone: "primary" },
       { key: "delete", label: "Delete", tone: "destructive" },
+      { key: "convert", label: "Convert to Text", tone: "primary" },
     ];
   }
 
@@ -294,6 +351,7 @@ function getSentMessagePreview(
   if (msg.type === "voice") return "Voice message";
   if (msg.type === "venue") return `📍 ${msg.venueName ?? "Venue"}`;
   if (msg.type === "location") return msg.locationLabel ?? "Location";
+  if (msg.type === "sharedEvent") return `📅 ${msg.sharedEventTitle ?? "Event"}`;
   return "Message";
 }
 
@@ -338,7 +396,10 @@ export default function ChatConversationScreen() {
     sportEmoji?: string;
     isOrganizerChat?: string;
     eventId?: string;
+    shareEvent?: string;
+    fromGroupChat?: string;
   }>();
+  const shareEventParam = typeof rawParams.shareEvent === "string" ? rawParams.shareEvent : undefined;
 
   const playerParams = useMemo(
     () => buildPlayerParams(rawParams),
@@ -373,7 +434,10 @@ export default function ChatConversationScreen() {
 
   const welcomeText = `Hey! I saw we matched for ${sportName}. Would love to play sometime! ${sportEmoji}`;
 
+  const MESSAGES_KEY = `messages_${playerName}`;
+
   const [inputText, setInputText] = useState("");
+  const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
       id: "welcome",
@@ -397,6 +461,24 @@ export default function ChatConversationScreen() {
     string | null
   >(null);
   const [venueModalVisible, setVenueModalVisible] = useState(false);
+  const [myProfile, setMyProfile] = useState<{
+    name?: string;
+    photo?: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    void getCurrentUser().then(() => {
+      void AsyncStorage.getItem("userProfile").then((raw) => {
+        if (raw) {
+          try {
+            setMyProfile(JSON.parse(raw) as { name?: string; photo?: string | null });
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+    });
+  }, []);
 
   const headerTitle = `${sportEmoji} ${playerName}`;
   const subtitle = [playerSkill, playerLocation].filter(Boolean).join(" · ");
@@ -537,6 +619,76 @@ export default function ChatConversationScreen() {
     [persistAfterSend, scrollToEnd]
   );
 
+  // Load persisted messages on mount, then mark ready
+  useEffect(() => {
+    AsyncStorage.getItem(MESSAGES_KEY).then((raw) => {
+      if (raw) {
+        try {
+          const saved = JSON.parse(raw) as ChatMessage[];
+          if (Array.isArray(saved) && saved.length > 0) {
+            setMessages(saved);
+          }
+        } catch {
+          /* ignore malformed data */
+        }
+      }
+      setMessagesLoaded(true);
+    });
+    // MESSAGES_KEY is stable for the lifetime of this screen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist every time messages change (after initial load)
+  useEffect(() => {
+    if (!messagesLoaded) return;
+    if (messages.length > 0) {
+      void AsyncStorage.setItem(MESSAGES_KEY, JSON.stringify(messages));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, messagesLoaded]);
+
+  // Send the shared event card once messages are loaded from storage
+  useEffect(() => {
+    if (!messagesLoaded) return;
+    if (!shareEventParam) return;
+    try {
+      const ev = JSON.parse(shareEventParam) as {
+        id?: number;
+        title?: string;
+        sport?: string;
+        location?: string;
+        time?: string;
+        spots?: number;
+        maxSpots?: number;
+      };
+      appendMessage({
+        type: "sharedEvent",
+        sent: true,
+        sharedEventId: ev.id,
+        sharedEventTitle: ev.title,
+        sharedEventSport: ev.sport,
+        sharedEventLocation: ev.location,
+        sharedEventTime: ev.time,
+        sharedEventSpots: ev.spots,
+        sharedEventMaxSpots: ev.maxSpots,
+        sharedEventData: shareEventParam,
+      });
+      void updateLastMessage(`📅 ${ev.title ?? "Event"}`);
+    } catch {
+      /* invalid JSON — ignore */
+    }
+    // Run once after messages are loaded; both deps are stable after mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messagesLoaded]);
+
+  const shouldShowTime = (msgs: ChatMessage[], index: number): boolean => {
+    if (index === 0) return true;
+    const current = msgs[index];
+    const previous = msgs[index - 1];
+    if (!current.createdAt || !previous.createdAt) return true;
+    return current.createdAt - previous.createdAt > 60 * 1000;
+  };
+
   const openProfile = () => {
     router.push({
       pathname: "/player-profile",
@@ -548,6 +700,8 @@ export default function ChatConversationScreen() {
         playerSkill: playerParams.playerSkill,
         playerPurpose: playerParams.playerPurpose,
         sportEmoji: playerParams.sportEmoji,
+        hideLocation: "true",
+        hideAvailability: "true",
       },
     });
   };
@@ -930,8 +1084,21 @@ export default function ChatConversationScreen() {
       );
       closeActionSheet();
     } else if (key === "delete") {
-      setMessages((prev) => prev.filter((m) => m.id !== targetId));
       closeActionSheet();
+      Alert.alert(
+        "Delete Message",
+        "This will remove the message from your view only.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => {
+              setMessages((prev) => prev.filter((m) => m.id !== targetId));
+            },
+          },
+        ]
+      );
     } else if (key === "convert") {
       if (isConverting) return;
       const target = messages.find((m) => m.id === targetId);
@@ -981,6 +1148,68 @@ export default function ChatConversationScreen() {
 
     if (msg.type === "venue" && msg.venueName) {
       return <VenueMessageBubble msg={msg} />;
+    }
+
+    if (msg.type === "sharedEvent") {
+      return (
+        <Pressable
+          onPress={() =>
+            router.push({
+              pathname: "/event-details",
+              params: {
+                eventId: String(msg.sharedEventId ?? ""),
+                eventData: msg.sharedEventData ?? "",
+                joined: "false",
+              },
+            })
+          }
+          style={{ gap: 6, minWidth: 200 }}
+        >
+          <Text
+            style={{
+              fontSize: 11,
+              color: "#86efac",
+              fontWeight: "600",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+            }}
+          >
+            📅 Event
+          </Text>
+          <Text
+            style={{ fontSize: 16, fontWeight: "800", color: "#ffffff" }}
+          >
+            {msg.sharedEventTitle}
+          </Text>
+          <Text style={{ fontSize: 13, color: "#dcfce7" }}>
+            🏷️ {msg.sharedEventSport}
+          </Text>
+          <Text style={{ fontSize: 13, color: "#dcfce7" }}>
+            📍 {msg.sharedEventLocation}
+          </Text>
+          <Text style={{ fontSize: 13, color: "#dcfce7" }}>
+            🕐 {msg.sharedEventTime}
+          </Text>
+          <Text style={{ fontSize: 13, color: "#dcfce7" }}>
+            👥 {msg.sharedEventSpots}/{msg.sharedEventMaxSpots} spots
+          </Text>
+          <View
+            style={{
+              marginTop: 4,
+              backgroundColor: "rgba(255,255,255,0.2)",
+              borderRadius: 8,
+              paddingVertical: 6,
+              alignItems: "center",
+            }}
+          >
+            <Text
+              style={{ color: "#ffffff", fontSize: 13, fontWeight: "700" }}
+            >
+              Tap to view event →
+            </Text>
+          </View>
+        </Pressable>
+      );
     }
 
     if (msg.isConvertedTranscript) {
@@ -1044,25 +1273,42 @@ export default function ChatConversationScreen() {
             showsVerticalScrollIndicator={false}
             onContentSizeChange={scrollToEnd}
           >
-            {messages.map((msg) => {
+            {messages.map((msg, index) => {
               const isSent = msg.sent;
               const isLocation = msg.type === "location";
               const isPhoto = msg.type === "photo" || msg.type === "image";
               const isVoice = msg.type === "voice";
               const isVenue = msg.type === "venue";
+              const isSharedEvent = msg.type === "sharedEvent";
               const isConverted = msg.isConvertedTranscript;
               const isRecalled = msg.recalled;
               const canLongPress = !isRecalled && !isConverted;
 
               return (
+                <React.Fragment key={msg.id}>
+                  {shouldShowTime(messages, index) && !isConverted ? (
+                    <Text style={styles.msgTimeLabel}>
+                      {new Date(msg.createdAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </Text>
+                  ) : null}
                 <View
-                  key={msg.id}
                   style={[
                     styles.bubbleRow,
                     isSent ? styles.bubbleRowSent : styles.bubbleRowReceived,
                     isConverted && styles.bubbleRowTranscript,
                   ]}
                 >
+                  {!isSent && !isConverted ? (
+                    <MessageAvatar
+                      name={playerName}
+                      photo={null}
+                      onPress={openProfile}
+                    />
+                  ) : null}
+
                   <Pressable
                     onLongPress={
                       canLongPress
@@ -1084,6 +1330,7 @@ export default function ChatConversationScreen() {
                         !isPhoto &&
                         !isVoice &&
                         !isVenue &&
+                        !isSharedEvent &&
                         !isConverted &&
                         !isRecalled &&
                         styles.bubbleSent,
@@ -1092,10 +1339,12 @@ export default function ChatConversationScreen() {
                         !isPhoto &&
                         !isVoice &&
                         !isVenue &&
+                        !isSharedEvent &&
                         !isConverted &&
                         !isRecalled &&
                         styles.bubbleReceived,
                       isVenue && !isRecalled && styles.bubbleVenue,
+                      isSharedEvent && !isRecalled && styles.bubbleSharedEvent,
                       isLocation && isSent && !isRecalled && styles.bubbleLocation,
                       isLocation &&
                         !isSent &&
@@ -1118,7 +1367,16 @@ export default function ChatConversationScreen() {
                   >
                     {renderBubbleContent(msg)}
                   </Pressable>
+
+                  {isSent && !isConverted ? (
+                    <MessageAvatar
+                      name={myProfile?.name ?? "Me"}
+                      photo={myProfile?.photo ?? null}
+                      onPress={() => router.push("/(tabs)/profile")}
+                    />
+                  ) : null}
                 </View>
+                </React.Fragment>
               );
             })}
           </ScrollView>
@@ -1379,6 +1637,12 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 12,
   },
+  msgTimeLabel: {
+    fontSize: 11,
+    color: "#94a3b8",
+    textAlign: "center",
+    marginVertical: 4,
+  },
   bubbleRow: {
     flexDirection: "row",
     marginBottom: 8,
@@ -1503,6 +1767,13 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 4,
     maxWidth: "88%",
     paddingVertical: 12,
+  },
+  bubbleSharedEvent: {
+    backgroundColor: "#15803d",
+    borderRadius: 16,
+    padding: 14,
+    maxWidth: "88%",
+    borderBottomRightRadius: 4,
   },
   venueBubbleInner: {
     gap: 6,

@@ -75,7 +75,7 @@ export default function SignupScreen() {
       return;
     }
     setError("");
-    router.push({
+    router.replace({
       pathname: "/(auth)/onboarding",
       params: { startSlide: "1" },
     });

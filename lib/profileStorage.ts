@@ -88,6 +88,8 @@ function migrateLegacy(raw: Record<string, unknown>): Partial<UserProfile> {
           gameReminders: legacyNotifications.gameReminders ?? true,
         }
       : undefined,
+    gamesPlayed:
+      typeof raw.gamesPlayed === "number" ? raw.gamesPlayed : undefined,
   };
 }
 

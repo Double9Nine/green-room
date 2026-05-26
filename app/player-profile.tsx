@@ -1,7 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
+  Image,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -59,13 +61,17 @@ export default function PlayerProfileScreen() {
     playerSkill?: string;
     playerPurpose?: string;
     playerTags?: string;
+    playerPhoto?: string;
     sportEmoji?: string;
     hideLocation?: string;
     hideAvailability?: string;
     isOrganizer?: string;
   }>();
 
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
+
   const playerName = params.playerName ?? "Player";
+  const playerPhoto = params.playerPhoto?.trim() || null;
   const hideLocation = params.hideLocation === "true";
   const hideAvailability = params.hideAvailability === "true";
   const isOrganizer = params.isOrganizer === "true";
@@ -134,9 +140,19 @@ export default function PlayerProfileScreen() {
           ]}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.avatarLarge}>
-            <Ionicons name="person" size={56} color={GOLD} />
-          </View>
+          <Pressable onPress={() => setShowPhotoModal(true)}>
+            <View style={styles.avatarLarge}>
+              {playerPhoto ? (
+                <Image
+                  source={{ uri: playerPhoto }}
+                  style={{ width: "100%", height: "100%", borderRadius: 999 }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Ionicons name="person" size={56} color={GOLD} />
+              )}
+            </View>
+          </Pressable>
 
           <Text style={styles.name}>{playerName}</Text>
 
@@ -209,23 +225,80 @@ export default function PlayerProfileScreen() {
           ) : null}
         </ScrollView>
 
-        <View
-          style={[
-            styles.footer,
-            { paddingBottom: Math.max(insets.bottom, 12) + 8 },
-          ]}
-        >
-          <Pressable
-            onPress={handleFooterPress}
-            style={({ pressed }) => [
-              styles.cta,
-              pressed && styles.ctaPressed,
+        {!hideAvailability ? (
+          <View
+            style={[
+              styles.footer,
+              { paddingBottom: Math.max(insets.bottom, 12) + 8 },
             ]}
           >
-            <Text style={styles.ctaText}>{footerLabel}</Text>
-          </Pressable>
-        </View>
+            <Pressable
+              onPress={handleFooterPress}
+              style={({ pressed }) => [
+                styles.cta,
+                pressed && styles.ctaPressed,
+              ]}
+            >
+              <Text style={styles.ctaText}>{footerLabel}</Text>
+            </Pressable>
+          </View>
+        ) : null}
       </SafeAreaView>
+
+      <Modal
+        visible={showPhotoModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPhotoModal(false)}
+      >
+        <Pressable
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.9)",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onPress={() => setShowPhotoModal(false)}
+        >
+          {playerPhoto ? (
+            <Image
+              source={{ uri: playerPhoto }}
+              style={{
+                width: "85%",
+                aspectRatio: 1,
+                borderRadius: 16,
+              }}
+              resizeMode="contain"
+            />
+          ) : (
+            <View
+              style={{
+                width: 200,
+                height: 200,
+                borderRadius: 100,
+                backgroundColor: "#15803d",
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 3,
+                borderColor: "#d4af37",
+              }}
+            >
+              <Ionicons name="person" size={100} color="#ffffff" />
+            </View>
+          )}
+          <Pressable
+            onPress={() => setShowPhotoModal(false)}
+            style={{
+              position: "absolute",
+              top: 56,
+              right: 20,
+              padding: 8,
+            }}
+          >
+            <Ionicons name="close" size={28} color="#ffffff" />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </>
   );
 }
