@@ -603,14 +603,17 @@ export default function ChatConversationScreen() {
       setMessageLimit(updated);
       await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(updated));
 
-      await AsyncStorage.removeItem("expiredMatches");
-
       const expiredRaw = await AsyncStorage.getItem("expiredMatches");
       const expired = expiredRaw ? JSON.parse(expiredRaw) : {};
       delete expired[playerId];
       await AsyncStorage.setItem("expiredMatches", JSON.stringify(expired));
+
+      const messagedRaw = await AsyncStorage.getItem("messagedPlayers");
+      const messaged = messagedRaw ? JSON.parse(messagedRaw) : {};
+      messaged[playerId] = Date.now();
+      await AsyncStorage.setItem("messagedPlayers", JSON.stringify(messaged));
     }
-  }, [isMatchChat, messageLimit, LIMIT_KEY, playerId]);
+  }, [isMatchChat, messageLimit, playerId, LIMIT_KEY]);
 
   const appendMessage = useCallback(
     (msg: Omit<ChatMessage, "id" | "createdAt">) => {
