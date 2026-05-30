@@ -1,6 +1,6 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -10,28 +10,38 @@ import {
   View,
 } from "react-native";
 
+const isValidEmail = (email: string) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState("");
-  const [toast, setToast] = useState("");
-  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    return () => {
-      if (toastTimeoutRef.current) {
-        clearTimeout(toastTimeoutRef.current);
-      }
-    };
-  }, []);
+  const handleSendReset = async () => {
+    setError("");
 
-  const handleSendResetLink = () => {
-    setToast("Reset link sent! Check your email 📧");
-    if (toastTimeoutRef.current) {
-      clearTimeout(toastTimeoutRef.current);
+    if (!email.trim()) {
+      setError("Please enter your email");
+      return;
     }
-    toastTimeoutRef.current = setTimeout(() => {
-      setToast("");
-      router.back();
-    }, 2200);
+
+    if (!isValidEmail(email)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+
+    setLoading(true);
+
+    // TODO: Replace with Supabase:
+    // const { error } = await supabase.auth.resetPasswordForEmail(email)
+    // if (error) setError('No account found with this email')
+    // else setSuccess(true)
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    setLoading(false);
+    setSuccess(true);
   };
 
   return (
@@ -54,7 +64,10 @@ export default function ForgotPasswordScreen() {
           <Text style={styles.label}>Email</Text>
           <TextInput
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+              setEmail(text);
+              if (error) setError("");
+            }}
             placeholder="Enter your email"
             placeholderTextColor="#6b7280"
             style={styles.input}
@@ -64,19 +77,35 @@ export default function ForgotPasswordScreen() {
           />
         </View>
 
+        {error ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        {success ? (
+          <View style={styles.successBox}>
+            <Text style={{ fontSize: 24 }}>📧</Text>
+            <Text style={styles.successTitle}>Check your email!</Text>
+            <Text style={styles.successBody}>
+              We sent a password reset link to {email}
+            </Text>
+            <Pressable onPress={() => router.push("/(auth)/login")}>
+              <Text style={styles.successLink}>Back to Log In →</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         <Pressable
-          onPress={handleSendResetLink}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          onPress={handleSendReset}
+          disabled={loading}
+          style={[styles.button, loading && styles.buttonDisabled]}
         >
-          <Text style={styles.buttonText}>Send Reset Link</Text>
+          <Text style={styles.buttonText}>
+            {loading ? "Sending..." : "Send Reset Link"}
+          </Text>
         </Pressable>
       </ScrollView>
-
-      {toast ? (
-        <View style={styles.toast} pointerEvents="none">
-          <Text style={styles.toastText}>{toast}</Text>
-        </View>
-      ) : null}
     </LinearGradient>
   );
 }
@@ -124,36 +153,62 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(20,83,45,0.18)",
   },
-  button: {
-    marginTop: 8,
-    borderRadius: 999,
-    backgroundColor: "#15803d",
-    borderWidth: 2,
-    borderColor: "#14532d",
-    paddingVertical: 16,
-  },
-  buttonPressed: {
-    opacity: 0.9,
-  },
-  buttonText: {
-    textAlign: "center",
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  toast: {
-    position: "absolute",
-    bottom: 40,
-    left: 20,
-    right: 20,
-    backgroundColor: "#1e293b",
-    padding: 14,
+  errorBox: {
+    backgroundColor: "rgba(220,38,38,0.15)",
     borderRadius: 12,
+    padding: 12,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: "#dc2626",
   },
-  toastText: {
+  errorText: {
     color: "#ffffff",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
     textAlign: "center",
+  },
+  successBox: {
+    backgroundColor: "rgba(21,128,61,0.2)",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: "#15803d",
+    alignItems: "center",
+    gap: 8,
+  },
+  successTitle: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  successBody: {
+    color: "#ffffff",
+    fontSize: 13,
+    textAlign: "center",
+    opacity: 0.8,
+  },
+  successLink: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "800",
+    textDecorationLine: "underline",
+    marginTop: 4,
+  },
+  button: {
+    borderRadius: 30,
+    backgroundColor: "#15803d",
+    paddingVertical: 16,
+    width: "100%",
+    alignItems: "center",
+  },
+  buttonDisabled: {
+    backgroundColor: "#86efac",
+  },
+  buttonText: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "800",
   },
 });

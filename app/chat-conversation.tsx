@@ -423,30 +423,31 @@ export default function ChatConversationScreen() {
       : isOrganizerChat
         ? "true"
         : "";
+  const isMatchChat = isOrganizerChatParam !== "true";
 
   const matchSport = useMemo(
     () => MATCH_SPORTS.find((s) => s.emoji === sportEmoji),
     [sportEmoji]
   );
 
-  const sportName = matchSport?.name ?? "your sport";
   const sportId = matchSport?.id ?? "tennis";
 
-  const welcomeText = `Hey! I saw we matched for ${sportName}. Would love to play sometime! ${sportEmoji}`;
-
   const MESSAGES_KEY = `messages_${playerName}`;
+  const LIMIT_KEY = `matchLimit_${playerName}`;
 
   const [inputText, setInputText] = useState("");
+  const [messageLimit, setMessageLimit] = useState<{
+    firstMessageSentAt: number | null;
+    followUpSentAt: number | null;
+    unlocked: boolean;
+  }>({ firstMessageSentAt: null, followUpSentAt: null, unlocked: false });
+  const messageLimitRef = useRef(messageLimit);
+  messageLimitRef.current = messageLimit;
+  const [showAISuggestions, setShowAISuggestions] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
   const [messagesLoaded, setMessagesLoaded] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [
-    {
-      id: "welcome",
-      type: "text",
-      text: welcomeText,
-      sent: false,
-      createdAt: Date.now(),
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const [fullImageUri, setFullImageUri] = useState<string | null>(null);
@@ -591,11 +592,33 @@ export default function ChatConversationScreen() {
     [saveConversation, updateLastMessage]
   );
 
+  const handleReceivedMessage = useCallback(async () => {
+    if (isMatchChat && !messageLimit.unlocked) {
+      const updated = {
+        ...messageLimit,
+        unlocked: true,
+        firstMessageSentAt: null,
+        followUpSentAt: null,
+      };
+      setMessageLimit(updated);
+      await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(updated));
+
+      await AsyncStorage.removeItem("expiredMatches");
+
+      const expiredRaw = await AsyncStorage.getItem("expiredMatches");
+      const expired = expiredRaw ? JSON.parse(expiredRaw) : {};
+      delete expired[playerId];
+      await AsyncStorage.setItem("expiredMatches", JSON.stringify(expired));
+    }
+  }, [isMatchChat, messageLimit, LIMIT_KEY, playerId]);
 
   const appendMessage = useCallback(
     (msg: Omit<ChatMessage, "id" | "createdAt">) => {
       if (!msg.sent) {
         void incrementUnreadPrivate();
+        if (isMatchChat) {
+          void handleReceivedMessage();
+        }
       }
       setMessages((prev) => {
         const next = [
@@ -613,10 +636,22 @@ export default function ChatConversationScreen() {
       if (msg.sent) {
         const preview = getSentMessagePreview(msg);
         void persistAfterSend(preview ?? "");
+        void saveLimitAfterSend();
       }
     },
-    [persistAfterSend, scrollToEnd]
+    // saveLimitAfterSend reads from ref so no dep needed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [persistAfterSend, scrollToEnd, isMatchChat, handleReceivedMessage]
   );
+
+  // Load match-limit state on mount
+  useEffect(() => {
+    AsyncStorage.getItem(LIMIT_KEY).then((raw) => {
+      if (raw) setMessageLimit(JSON.parse(raw));
+    });
+    // LIMIT_KEY is stable for the lifetime of this screen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load persisted messages on mount, then mark ready
   useEffect(() => {
@@ -728,6 +763,176 @@ export default function ChatConversationScreen() {
     });
   };
 
+  const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+  const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
+
+  const canSendMessage = (() => {
+    if (!isMatchChat) return true;
+    if (messageLimit.unlocked) return true;
+    if (!messageLimit.firstMessageSentAt) return true;
+
+    const hasReceivedReply = messages.some((m) => !m.sent);
+    if (hasReceivedReply) return true;
+
+    const fiveDaysLater = messageLimit.firstMessageSentAt + FIVE_DAYS_MS;
+    const followUpWindowEnd = fiveDaysLater + TWO_DAYS_MS;
+
+    if (!messageLimit.followUpSentAt) {
+      if (Date.now() >= fiveDaysLater && Date.now() < followUpWindowEnd) {
+        return true;
+      }
+      return false;
+    }
+
+    const twoDaysLater = messageLimit.followUpSentAt + TWO_DAYS_MS;
+    return Date.now() < twoDaysLater;
+  })();
+
+  const limitStatusMessage = (() => {
+    if (!isMatchChat) return null;
+    if (messageLimit.unlocked) return null;
+    if (!messageLimit.firstMessageSentAt) return null;
+    const hasReceivedReply = messages.some((m) => !m.sent);
+    if (hasReceivedReply) return null;
+    if (!messageLimit.followUpSentAt) {
+      const fiveDaysLater = messageLimit.firstMessageSentAt + FIVE_DAYS_MS;
+      const followUpWindowEnd = fiveDaysLater + TWO_DAYS_MS;
+
+      if (Date.now() < fiveDaysLater) {
+        const daysLeft = Math.ceil(
+          (fiveDaysLater - Date.now()) / (24 * 60 * 60 * 1000)
+        );
+        return `Waiting for reply... Follow-up available in ${daysLeft} day${daysLeft === 1 ? "" : "s"}`;
+      }
+
+      if (Date.now() >= fiveDaysLater && Date.now() < followUpWindowEnd) {
+        const windowDaysLeft = Math.ceil(
+          (followUpWindowEnd - Date.now()) / (24 * 60 * 60 * 1000)
+        );
+        return `No reply yet. Send a follow-up within ${windowDaysLeft} day${windowDaysLeft === 1 ? "" : "s"} or this match will expire.`;
+      }
+
+      if (Date.now() >= followUpWindowEnd) {
+        return "This match has expired.";
+      }
+    }
+
+    if (messageLimit.followUpSentAt) {
+      const twoDaysLater = messageLimit.followUpSentAt + TWO_DAYS_MS;
+      const daysLeft = Math.ceil(
+        (twoDaysLater - Date.now()) / (24 * 60 * 60 * 1000)
+      );
+      if (Date.now() < twoDaysLater) {
+        return `Follow-up sent. Waiting for reply... (${daysLeft} day${daysLeft === 1 ? "" : "s"} left)`;
+      }
+      return "This match has expired.";
+    }
+
+    return null;
+  })();
+
+  const saveExpired = async () => {
+    const raw = await AsyncStorage.getItem("expiredMatches");
+    const expired = raw ? JSON.parse(raw) : {};
+    expired[playerId] = Date.now();
+    await AsyncStorage.setItem("expiredMatches", JSON.stringify(expired));
+  };
+
+  const expiredSavedRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      limitStatusMessage === "This match has expired." &&
+      !expiredSavedRef.current
+    ) {
+      expiredSavedRef.current = true;
+      void saveExpired();
+    }
+  }, [limitStatusMessage]);
+
+  const saveLimitAfterSend = async () => {
+    if (!isMatchChat) return;
+    const current = messageLimitRef.current;
+    if (!current.firstMessageSentAt) {
+      const updated = { ...current, firstMessageSentAt: Date.now() };
+      setMessageLimit(updated);
+      await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(updated));
+    } else if (!current.followUpSentAt) {
+      const updated = { ...current, followUpSentAt: Date.now() };
+      setMessageLimit(updated);
+      await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(updated));
+    }
+  };
+
+  const generateSuggestions = async () => {
+    setAiLoading(true);
+    setAiSuggestions([]);
+    try {
+      const isFirstChat = messages.length === 0;
+
+      const lastFewMessages = messages.slice(-6).map((m) => ({
+        role: m.sent ? "assistant" : "user",
+        content: m.text || "[media message]",
+      }));
+
+      const systemPrompt = isFirstChat
+        ? `You are helping someone send an icebreaker message to a new sports match. ` +
+          `The other person plays ${sportEmoji} at ${playerSkill} level from ${playerLocation}. ` +
+          `Generate 3 short friendly icebreaker messages to start the conversation. ` +
+          `Keep each under 20 words. Be casual and sports-focused. ` +
+          `Return ONLY a JSON array of 3 strings, nothing else. ` +
+          `Example: ["Hey! Would love to hit this weekend!", "Nice to match!", "When are you usually free to play?"]`
+        : `You are helping someone reply in a sports chat conversation. ` +
+          `The other person plays ${sportEmoji} at ${playerSkill} level. ` +
+          `Based on the conversation, generate 3 natural reply options. ` +
+          `Keep each under 20 words. Be casual and friendly. ` +
+          `Return ONLY a JSON array of 3 strings, nothing else.`;
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || "",
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 200,
+          system: systemPrompt,
+          messages: isFirstChat
+            ? [{ role: "user", content: "Generate icebreaker messages" }]
+            : [
+                ...lastFewMessages,
+                { role: "user", content: "Generate reply suggestions" },
+              ],
+        }),
+      });
+
+      const data = await response.json();
+      const text = data.content?.[0]?.text || "[]";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const suggestions = JSON.parse(clean) as string[];
+      setAiSuggestions(suggestions);
+    } catch {
+      setAiSuggestions([
+        "Sounds great! 🎾",
+        "When are you free to play?",
+        "Let's schedule a game!",
+      ]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const toggleAISuggestions = async () => {
+    if (showAISuggestions) {
+      setShowAISuggestions(false);
+      return;
+    }
+    setShowAISuggestions(true);
+    await generateSuggestions();
+  };
+
   const sendTextMessage = useCallback(() => {
     const text = inputText.trim();
     if (!text) return;
@@ -748,6 +953,7 @@ export default function ChatConversationScreen() {
     setInputText("");
     scrollToEnd();
     void persistAfterSend(text);
+    void saveLimitAfterSend();
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [inputText, persistAfterSend, scrollToEnd]);
 
@@ -1400,6 +1606,65 @@ export default function ChatConversationScreen() {
             })}
           </ScrollView>
 
+          {showAISuggestions ? (
+            <View style={styles.aiPanel}>
+              <View style={styles.aiPanelHeader}>
+                <View style={styles.aiPanelHeaderLeft}>
+                  <View style={styles.aiIconDot}>
+                    <Text style={styles.aiIconDotText}>✦</Text>
+                  </View>
+                  <Text style={styles.aiPanelLabel}>
+                    {messages.length === 0 ? "AI Icebreaker" : "AI Suggestions"}
+                  </Text>
+                </View>
+                <Pressable onPress={() => setShowAISuggestions(false)}>
+                  <Ionicons name="close" size={16} color="#94a3b8" />
+                </Pressable>
+              </View>
+
+              {aiLoading ? (
+                <Text style={styles.aiLoadingText}>
+                  Generating suggestions...
+                </Text>
+              ) : (
+                <View style={styles.aiSuggestionsList}>
+                  {aiSuggestions.map((suggestion, index) => (
+                    <Pressable
+                      key={index}
+                      onPress={() => {
+                        setInputText(suggestion);
+                        setShowAISuggestions(false);
+                      }}
+                      style={styles.aiSuggestionPill}
+                    >
+                      <Text style={styles.aiSuggestionText}>{suggestion}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : null}
+
+          {limitStatusMessage ? (
+            <View
+              style={[
+                styles.limitBanner,
+                limitStatusMessage.includes("expired") &&
+                  styles.limitBannerExpired,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.limitBannerText,
+                  limitStatusMessage.includes("expired") &&
+                    styles.limitBannerTextExpired,
+                ]}
+              >
+                {limitStatusMessage}
+              </Text>
+            </View>
+          ) : null}
+
           {cancelZoneVisible ? (
             <Animated.View
               style={[
@@ -1429,9 +1694,9 @@ export default function ChatConversationScreen() {
           >
             <Pressable
               onPress={toggleVoiceInputMode}
-              style={styles.iconBtn}
+              style={[styles.iconBtn, !canSendMessage && styles.iconBtnDisabled]}
               hitSlop={6}
-              disabled={isRecording}
+              disabled={isRecording || !canSendMessage}
             >
               <Ionicons
                 name={voiceInputMode ? "mic" : "mic-outline"}
@@ -1453,8 +1718,8 @@ export default function ChatConversationScreen() {
               <>
                 <TextInput
                   ref={inputRef}
-                  style={styles.input}
-                  placeholder="Type a message..."
+                  style={[styles.input, !canSendMessage && { opacity: 0.4 }]}
+                  placeholder={canSendMessage ? "Type a message..." : "Messaging unavailable"}
                   placeholderTextColor="#94a3b8"
                   value={inputText}
                   onChangeText={setInputText}
@@ -1462,14 +1727,17 @@ export default function ChatConversationScreen() {
                   returnKeyType="send"
                   blurOnSubmit={false}
                   onSubmitEditing={sendTextMessage}
+                  editable={canSendMessage}
                 />
 
                 {showSendButton ? (
                   <Pressable
                     onPress={sendTextMessage}
+                    disabled={!canSendMessage}
                     style={({ pressed }) => [
                       styles.sendBtn,
                       pressed && styles.sendBtnPressed,
+                      !canSendMessage && { opacity: 0.4 },
                     ]}
                   >
                     <Ionicons name="arrow-up" size={22} color="#ffffff" />
@@ -1481,10 +1749,29 @@ export default function ChatConversationScreen() {
             )}
 
             <Pressable
-              onPress={() => setVenueModalVisible(true)}
-              style={styles.iconBtn}
+              onPress={toggleAISuggestions}
+              style={[
+                styles.aiToggleBtn,
+                showAISuggestions && styles.aiToggleBtnActive,
+              ]}
               hitSlop={6}
               disabled={isRecording}
+            >
+              <Text
+                style={[
+                  styles.aiToggleBtnText,
+                  showAISuggestions && styles.aiToggleBtnTextActive,
+                ]}
+              >
+                ✦
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setVenueModalVisible(true)}
+              style={[styles.iconBtn, !canSendMessage && styles.iconBtnDisabled]}
+              hitSlop={6}
+              disabled={isRecording || !canSendMessage}
             >
               <Ionicons
                 name="location-outline"
@@ -1493,11 +1780,21 @@ export default function ChatConversationScreen() {
               />
             </Pressable>
 
-            <Pressable onPress={openCamera} style={styles.iconBtn} hitSlop={6}>
+            <Pressable
+              onPress={openCamera}
+              style={[styles.iconBtn, !canSendMessage && styles.iconBtnDisabled]}
+              hitSlop={6}
+              disabled={!canSendMessage}
+            >
               <Ionicons name="camera-outline" size={26} color={ACCENT_GREEN} />
             </Pressable>
 
-            <Pressable onPress={openLibrary} style={styles.iconBtn} hitSlop={6}>
+            <Pressable
+              onPress={openLibrary}
+              style={[styles.iconBtn, !canSendMessage && styles.iconBtnDisabled]}
+              hitSlop={6}
+              disabled={!canSendMessage}
+            >
               <Ionicons name="image-outline" size={26} color={ACCENT_GREEN} />
             </Pressable>
           </View>
@@ -1921,6 +2218,104 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: "center",
     justifyContent: "center",
+  },
+  iconBtnDisabled: {
+    opacity: 0.4,
+  },
+  limitBanner: {
+    backgroundColor: "#f0fdf4",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 0.5,
+    borderTopColor: "#e2e8f0",
+  },
+  limitBannerExpired: {
+    backgroundColor: "#fee2e2",
+  },
+  limitBannerText: {
+    fontSize: 12,
+    color: "#15803d",
+    textAlign: "center",
+    fontWeight: "500",
+  },
+  limitBannerTextExpired: {
+    color: "#dc2626",
+  },
+  aiToggleBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#f0fdf4",
+    borderWidth: 0.5,
+    borderColor: "#86efac",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  aiToggleBtnActive: {
+    backgroundColor: "#15803d",
+  },
+  aiToggleBtnText: {
+    fontSize: 14,
+    color: "#15803d",
+  },
+  aiToggleBtnTextActive: {
+    color: "#ffffff",
+  },
+  aiPanel: {
+    backgroundColor: "#ffffff",
+    borderTopWidth: 0.5,
+    borderTopColor: "#e2e8f0",
+    padding: 10,
+  },
+  aiPanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  aiPanelHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  aiIconDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#15803d",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  aiIconDotText: {
+    color: "#ffffff",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  aiPanelLabel: {
+    fontSize: 11,
+    color: "#15803d",
+    fontWeight: "600",
+  },
+  aiLoadingText: {
+    color: "#94a3b8",
+    fontSize: 12,
+    textAlign: "center",
+    paddingVertical: 8,
+  },
+  aiSuggestionsList: {
+    gap: 6,
+  },
+  aiSuggestionPill: {
+    backgroundColor: "#f0fdf4",
+    borderWidth: 0.5,
+    borderColor: "#86efac",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  aiSuggestionText: {
+    fontSize: 12,
+    color: "#15803d",
   },
   input: {
     flex: 1,

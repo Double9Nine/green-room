@@ -247,6 +247,50 @@ export default function ProfileScreen() {
     await saveUserProfile(next);
   };
 
+  const handleLogOut = () => {
+    Alert.alert("Log Out", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Log Out",
+        style: "destructive",
+        onPress: () => {
+          router.replace("/(auth)/onboarding");
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete Account",
+      "This will permanently delete your account and all your data. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "Are you absolutely sure?",
+              "All your events, matches and messages will be permanently deleted.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Yes, Delete Everything",
+                  style: "destructive",
+                  onPress: async () => {
+                    await AsyncStorage.clear();
+                    router.replace("/(auth)/onboarding");
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
   const pickPhoto = async () => {
     if (!profile) return;
     try {
@@ -591,6 +635,62 @@ export default function ProfileScreen() {
           </Text>
           <Text style={{ fontSize: 20 }}>🌟</Text>
         </Pressable>
+
+        <View style={{ marginTop: 32, marginBottom: 8 }}>
+          <Text style={{
+            fontSize: 11,
+            fontWeight: "600",
+            color: "#94a3b8",
+            letterSpacing: 1,
+            textTransform: "uppercase",
+            textAlign: "center",
+            marginBottom: 12,
+          }}>
+            Account
+          </Text>
+
+          <Pressable
+            onPress={handleLogOut}
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: 12,
+              borderWidth: 0.5,
+              borderColor: "#e2e8f0",
+              paddingVertical: 14,
+              alignItems: "center",
+              flexDirection: "row",
+              justifyContent: "center",
+              gap: 8,
+              marginBottom: 8,
+            }}
+          >
+            <Ionicons name="log-out-outline" size={18} color="#64748b" />
+            <Text style={{ color: "#64748b", fontSize: 14, fontWeight: "500" }}>
+              Log Out
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={handleDeleteAccount}
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: 12,
+              borderWidth: 0.5,
+              borderColor: "#fca5a5",
+              paddingVertical: 14,
+              alignItems: "center",
+              flexDirection: "row",
+              justifyContent: "center",
+              gap: 8,
+              marginBottom: 32,
+            }}
+          >
+            <Ionicons name="trash-outline" size={18} color="#dc2626" />
+            <Text style={{ color: "#dc2626", fontSize: 14, fontWeight: "500" }}>
+              Delete Account
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
 
       <Modal

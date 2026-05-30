@@ -1,22 +1,26 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Animated,
-  Dimensions,
-  FlatList,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
+    Animated,
+    Dimensions,
+    FlatList,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import {
+    getSortedPlayersForSport,
+    type MatchPlayer,
+} from "@/constants/matchPlayers";
 import { getMatchSport } from "@/constants/matchSports";
 
 const { width, height } = Dimensions.get("window");
@@ -53,117 +57,12 @@ const SPARKLE_POSITIONS = [
   { left: "92%", top: "72%", size: 4, baseOpacity: 0.19 },
 ];
 
-type Player = {
-  id: number;
-  name: string;
-  age: number;
-  location: string;
-  skill: string;
-  availability: string;
-  purpose: string;
-  tags: string[];
-  photo: string | null;
-  gamesPlayed: number;
-};
+type Player = MatchPlayer;
 
-const DUMMY_PLAYERS: Player[] = [
-  {
-    id: 1,
-    name: "Alex J.",
-    age: 28,
-    location: "Jersey City, NJ",
-    skill: "3.5 (Intermediate)",
-    availability: "Weekends/Eves",
-    purpose: "Trying to level up 🏆",
-    tags: ["Low-key competitive", "Won't flake"],
-    photo: null,
-    gamesPlayed: 12,
-  },
-  {
-    id: 2,
-    name: "Sarah M.",
-    age: 31,
-    location: "Manhattan, NY",
-    skill: "3.0 (Advanced Beginner)",
-    availability: "Weekday Eves",
-    purpose: "Looking for my go-to partner 🤝",
-    tags: ["Chill vibes only", "Good banter"],
-    photo: null,
-    gamesPlayed: 8,
-  },
-  {
-    id: 3,
-    name: "Maria L.",
-    age: 26,
-    location: "Hoboken, NJ",
-    skill: "4.0 (Intermediate+)",
-    availability: "Weekends",
-    purpose: "Just here to meet people 😎",
-    tags: ["Social cardio", "Shows up"],
-    photo: null,
-    gamesPlayed: 21,
-  },
-  {
-    id: 4,
-    name: "James K.",
-    age: 33,
-    location: "Brooklyn, NY",
-    skill: "2.5 (Beginner+)",
-    availability: "Mornings",
-    purpose: "Just trying to stay active 🏃",
-    tags: ["Beginner-friendly", "No pressure"],
-    photo: null,
-    gamesPlayed: 5,
-  },
-  {
-    id: 5,
-    name: "Lisa C.",
-    age: 29,
-    location: "Queens, NY",
-    skill: "3.5 (Intermediate)",
-    availability: "Flexible",
-    purpose: "Trying to level up 🏆",
-    tags: ["Down for a challenge", "Chatty", "Won't flake"],
-    photo: null,
-    gamesPlayed: 17,
-  },
-  {
-    id: 6,
-    name: "David W.",
-    age: 35,
-    location: "Weehawken, NJ",
-    skill: "4.5 (Advanced)",
-    availability: "Weekends",
-    purpose: "Looking for my go-to partner 🤝",
-    tags: ["Low-key competitive", "Shows up"],
-    photo: null,
-    gamesPlayed: 34,
-  },
-  {
-    id: 7,
-    name: "Emma R.",
-    age: 24,
-    location: "Union City, NJ",
-    skill: "2.0 (Beginner)",
-    availability: "Evenings",
-    purpose: "Just here to meet people 😎",
-    tags: ["Chill vibes only", "Beginner-friendly"],
-    photo: null,
-    gamesPlayed: 3,
-  },
-  {
-    id: 8,
-    name: "Chris T.",
-    age: 30,
-    location: "Fort Lee, NJ",
-    skill: "3.0 (Advanced Beginner)",
-    availability: "Weekends/Eves",
-    purpose: "Other ✨",
-    tags: ["Good banter", "No pressure", "Social cardio"],
-    photo: null,
-    gamesPlayed: 9,
-  },
-];
+const SKIPPED_KEY = "skippedPlayers";
+const MESSAGED_KEY = "messagedPlayers";
+const EXPIRED_KEY = "expiredMatches";
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 function getLevelLabel(skill: string) {
   const s = skill.toLowerCase();
@@ -329,6 +228,16 @@ function PlayerCard({
             </View>
 
             <View style={styles.cardBody}>
+              {player.matchScore >= 85 ? (
+                <View style={styles.matchBadgeGreat}>
+                  <Text style={styles.matchBadgeGreatText}>⭐ GREAT MATCH</Text>
+                </View>
+              ) : player.matchScore >= 70 ? (
+                <View style={styles.matchBadgeGood}>
+                  <Text style={styles.matchBadgeGoodText}>✓ GOOD MATCH</Text>
+                </View>
+              ) : null}
+
               <View style={styles.sportHeaderRow}>
                 <Text style={styles.sportTitle} numberOfLines={2}>
                   {sportEmoji} {sportName.toUpperCase()}
@@ -355,6 +264,14 @@ function PlayerCard({
                 <StatRow icon="🎯" label="Skill" value={player.skill} />
                 <StatRow icon="📅" label="Avail" value={player.availability} />
                 <PlayerPurposeAndTags player={player} />
+              </View>
+
+              <View style={styles.matchReasonsRow}>
+                {player.matchReasons.map((reason, index) => (
+                  <View key={index} style={styles.matchReasonPill}>
+                    <Text style={styles.matchReasonText}>{reason}</Text>
+                  </View>
+                ))}
               </View>
 
               <View style={styles.cardActions}>
@@ -538,12 +455,77 @@ export default function MatchResultsScreen() {
     sportLabel?: string;
   }>();
 
-  const [players, setPlayers] = useState<Player[]>(DUMMY_PLAYERS);
+  const [players, setPlayers] = useState<Player[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [userPurpose, setUserPurpose] = useState("");
   const [userTags, setUserTags] = useState<string[]>([]);
   const scrollX = useRef(new Animated.Value(0)).current;
   const listRef = useRef<FlatList<Player>>(null);
+
+  useEffect(() => {
+    const loadAndFilter = async () => {
+      const raw = await AsyncStorage.getItem(SKIPPED_KEY);
+      const skipped = raw ? JSON.parse(raw) : {};
+
+      const messagedRaw = await AsyncStorage.getItem(MESSAGED_KEY);
+      const messaged = messagedRaw ? JSON.parse(messagedRaw) : {};
+
+      const expiredRaw = await AsyncStorage.getItem(EXPIRED_KEY);
+      const expired = expiredRaw ? JSON.parse(expiredRaw) : {};
+
+      const now = Date.now();
+      const validSkipped = Object.fromEntries(
+        Object.entries(skipped).filter(
+          ([, time]) => now - (time as number) <= THREE_DAYS_MS
+        )
+      );
+      await AsyncStorage.setItem(SKIPPED_KEY, JSON.stringify(validSkipped));
+
+      const sportId =
+        typeof params.sport === "string" ? params.sport : "tennis";
+      const sortedPlayers = getSortedPlayersForSport(sportId);
+
+      let updatedMessaged = { ...messaged };
+      let messagedChanged = false;
+      const filtered: Player[] = [];
+
+      for (const player of sortedPlayers) {
+        const skippedAt = validSkipped[player.id];
+        if (skippedAt) continue;
+
+        if (messaged[player.id]) {
+          const expiredAt = expired[player.id];
+          if (!expiredAt) continue;
+          if (Date.now() - expiredAt < THREE_DAYS_MS) continue;
+
+          delete updatedMessaged[player.id];
+          messagedChanged = true;
+
+          await AsyncStorage.removeItem(`matchLimit_${player.name}`);
+
+          const expiredRaw = await AsyncStorage.getItem(EXPIRED_KEY);
+          const expiredData = expiredRaw ? JSON.parse(expiredRaw) : {};
+          delete expiredData[player.id];
+          await AsyncStorage.setItem(EXPIRED_KEY, JSON.stringify(expiredData));
+
+          filtered.push(player);
+          continue;
+        }
+
+        filtered.push(player);
+      }
+
+      if (messagedChanged) {
+        await AsyncStorage.setItem(
+          MESSAGED_KEY,
+          JSON.stringify(updatedMessaged)
+        );
+      }
+
+      setPlayers(filtered);
+    };
+    void loadAndFilter();
+  }, [params.sport]);
 
   useEffect(() => {
     void AsyncStorage.getItem("userProfile").then((val) => {
@@ -571,8 +553,17 @@ export default function MatchResultsScreen() {
 
   const selectedSportEmoji = sportDisplay.emoji;
 
+  const saveMessaged = async (playerId: number) => {
+    const raw = await AsyncStorage.getItem(MESSAGED_KEY);
+    const messaged = raw ? JSON.parse(raw) : {};
+    messaged[playerId] = Date.now();
+    await AsyncStorage.setItem(MESSAGED_KEY, JSON.stringify(messaged));
+  };
+
   const openChat = useCallback(
-    (player: Player) => {
+    async (player: Player) => {
+      await saveMessaged(player.id);
+      setPlayers((prev) => prev.filter((p) => p.id !== player.id));
       router.push({
         pathname: "/chat-conversation",
         params: {
@@ -609,8 +600,15 @@ export default function MatchResultsScreen() {
     [scrollX, handleScroll]
   );
 
-  const removePlayer = (id: number) => {
-    setPlayers((prev) => prev.filter((p) => p.id !== id));
+  const handleSkip = async (playerId: number) => {
+    const raw = await AsyncStorage.getItem(SKIPPED_KEY);
+    const skipped = raw ? JSON.parse(raw) : {};
+
+    skipped[playerId] = Date.now();
+
+    await AsyncStorage.setItem(SKIPPED_KEY, JSON.stringify(skipped));
+
+    setPlayers((prev) => prev.filter((p) => p.id !== playerId));
   };
 
   useEffect(() => {
@@ -684,8 +682,8 @@ export default function MatchResultsScreen() {
                     sportName={sportDisplay.name}
                     sportEmoji={sportDisplay.emoji}
                     featured={index === activeIndex}
-                    onMessageAndPlan={() => openChat(item)}
-                    onRemoveComplete={removePlayer}
+                    onMessageAndPlan={() => void openChat(item)}
+                    onRemoveComplete={(id) => void handleSkip(id)}
                   />
                 )}
               />
@@ -876,6 +874,58 @@ const styles = StyleSheet.create({
     padding: 14,
     paddingTop: 12,
     justifyContent: "space-between",
+  },
+  matchBadgeGreat: {
+    backgroundColor: "rgba(212,175,55,0.2)",
+    borderWidth: 0.5,
+    borderColor: GOLD,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    alignSelf: "center",
+    marginBottom: 6,
+  },
+  matchBadgeGreatText: {
+    color: GOLD,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  matchBadgeGood: {
+    backgroundColor: "rgba(134,239,172,0.15)",
+    borderWidth: 0.5,
+    borderColor: "#86efac",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    alignSelf: "center",
+    marginBottom: 6,
+  },
+  matchBadgeGoodText: {
+    color: "#86efac",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  matchReasonsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    justifyContent: "center",
+    marginVertical: 6,
+  },
+  matchReasonPill: {
+    backgroundColor: "rgba(6,78,59,0.8)",
+    borderWidth: 0.5,
+    borderColor: "rgba(134,239,172,0.4)",
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  matchReasonText: {
+    color: "#86efac",
+    fontSize: 9,
+    fontWeight: "600",
   },
   sportHeaderRow: {
     flexDirection: "row",

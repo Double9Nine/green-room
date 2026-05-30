@@ -13,8 +13,9 @@ import {
   ScrollView,
 } from "react-native";
 
-const isValidEmail = (email: string) => {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+const isValidEduEmail = (email: string): boolean => {
+  const trimmed = email.trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.edu$/.test(trimmed);
 };
 
 const PASSWORD_CHECK_ITEMS = [
@@ -33,6 +34,7 @@ export default function SignupScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
+  const [emailExists, setEmailExists] = useState(false);
 
   const passwordChecks = useMemo(
     () => ({
@@ -46,8 +48,15 @@ export default function SignupScreen() {
   );
 
   const handleSignUp = () => {
-    if (!isValidEmail(email)) {
-      setError("Please enter a valid email address");
+    setEmailExists(false);
+    if (!email.trim()) {
+      setError("Please enter your email");
+      return;
+    }
+    if (!isValidEduEmail(email)) {
+      setError(
+        "We currently only accept .edu email addresses during our trial period"
+      );
       return;
     }
     if (!passwordChecks.length) {
@@ -105,14 +114,49 @@ export default function SignupScreen() {
               onChangeText={(text) => {
                 setEmail(text);
                 if (error) setError("");
+                if (emailExists) setEmailExists(false);
               }}
-              placeholder="Enter your email"
+              placeholder="Your .edu email address"
               placeholderTextColor="#6b7280"
               style={styles.input}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
             />
+            <Text style={{ color: "#ffffff", fontSize: 12, marginTop: 4, opacity: 0.8 }}>
+              Currently accepting .edu emails only
+            </Text>
+            {emailExists && (
+              <View style={{
+                backgroundColor: "rgba(220,38,38,0.15)",
+                borderRadius: 12,
+                padding: 12,
+                marginTop: 8,
+                borderWidth: 1,
+                borderColor: "#dc2626",
+              }}>
+                <Text style={{
+                  color: "#ffffff",
+                  fontSize: 13,
+                  fontWeight: "600",
+                  textAlign: "center",
+                }}>
+                  This email is already registered.
+                </Text>
+                <Pressable onPress={() => router.push("/(auth)/login")}>
+                  <Text style={{
+                    color: "#ffffff",
+                    fontSize: 13,
+                    fontWeight: "800",
+                    textAlign: "center",
+                    textDecorationLine: "underline",
+                    marginTop: 4,
+                  }}>
+                    Log in instead →
+                  </Text>
+                </Pressable>
+              </View>
+            )}
           </View>
 
           <View style={styles.fieldGroup}>
