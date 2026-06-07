@@ -1,6 +1,7 @@
-import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -54,6 +55,37 @@ export default function MatchScreen() {
   const emojiAnims = useRef(
     MATCH_SPORT_CARDS.map(() => new Animated.Value(0))
   ).current;
+
+  useFocusEffect(
+    useCallback(() => {
+      const checkSession = async () => {
+        const raw = await AsyncStorage.getItem("lastMatchSession");
+        if (!raw) return;
+
+        const session = JSON.parse(raw);
+        const sessionDate = new Date(session.timestamp);
+        const today = new Date();
+
+        const isSameDay =
+          sessionDate.getDate() === today.getDate() &&
+          sessionDate.getMonth() === today.getMonth() &&
+          sessionDate.getFullYear() === today.getFullYear();
+
+        if (isSameDay) {
+          router.navigate({
+            pathname: "/match-results",
+            params: {
+              sport: session.sport,
+              sportLabel: session.sportLabel,
+            },
+          });
+        } else {
+          await AsyncStorage.removeItem("lastMatchSession");
+        }
+      };
+      void checkSession();
+    }, [])
+  );
 
   useEffect(() => {
     emojiAnims.forEach((anim, index) => {

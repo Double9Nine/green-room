@@ -528,6 +528,20 @@ export default function MatchResultsScreen() {
   }, [params.sport]);
 
   useEffect(() => {
+    const saveSession = async () => {
+      await AsyncStorage.setItem(
+        "lastMatchSession",
+        JSON.stringify({
+          sport: params.sport,
+          sportLabel: params.sportLabel,
+          timestamp: Date.now(),
+        })
+      );
+    };
+    void saveSession();
+  }, [params.sport]);
+
+  useEffect(() => {
     void AsyncStorage.getItem("userProfile").then((val) => {
       if (val) {
         const p = JSON.parse(val) as { purpose?: string; tags?: string[] };
@@ -624,7 +638,10 @@ export default function MatchResultsScreen() {
         options={{
           headerLeft: () => (
             <Pressable
-              onPress={() => router.back()}
+              onPress={() => {
+                void AsyncStorage.removeItem("lastMatchSession");
+                router.back();
+              }}
               style={styles.headerBack}
             >
               <Ionicons name="chevron-back" size={24} color={GOLD} />
