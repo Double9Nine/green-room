@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -55,33 +55,31 @@ export default function MatchScreen() {
   const emojiAnims = useRef(
     MATCH_SPORT_CARDS.map(() => new Animated.Value(0))
   ).current;
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const redirectedRef = useRef(false);
 
   useFocusEffect(
     useCallback(() => {
       const checkSession = async () => {
         const raw = await AsyncStorage.getItem("lastMatchSession");
-        if (!raw) return;
-
-        const session = JSON.parse(raw);
-        const sessionDate = new Date(session.timestamp);
-        const today = new Date();
-
-        const isSameDay =
-          sessionDate.getDate() === today.getDate() &&
-          sessionDate.getMonth() === today.getMonth() &&
-          sessionDate.getFullYear() === today.getFullYear();
-
-        if (isSameDay) {
-          router.navigate({
-            pathname: "/match-results",
-            params: {
-              sport: session.sport,
-              sportLabel: session.sportLabel,
-            },
-          });
-        } else {
-          await AsyncStorage.removeItem("lastMatchSession");
+        if (!raw) {
+          redirectedRef.current = false;
+          setSessionChecked(true);
+          return;
         }
+        if (redirectedRef.current) {
+          setSessionChecked(true);
+          return;
+        }
+        redirectedRef.current = true;
+        const session = JSON.parse(raw);
+        router.replace({
+          pathname: "/match-results",
+          params: {
+            sport: session.sport,
+            sportLabel: session.sportLabel,
+          },
+        });
       };
       void checkSession();
     }, [])
@@ -98,6 +96,8 @@ export default function MatchScreen() {
       }).start();
     });
   }, [emojiAnims]);
+
+  if (!sessionChecked) return null;
 
   return (
     <LinearGradient

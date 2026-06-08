@@ -638,9 +638,10 @@ export default function MatchResultsScreen() {
         options={{
           headerLeft: () => (
             <Pressable
-              onPress={() => {
-                void AsyncStorage.removeItem("lastMatchSession");
-                router.back();
+              onPress={async () => {
+                await AsyncStorage.removeItem("lastMatchSession");
+                router.dismissAll();
+                router.replace("/(tabs)/match");
               }}
               style={styles.headerBack}
             >

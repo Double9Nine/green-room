@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -31,7 +32,9 @@ export default function LoginScreen() {
       return;
     }
     setError("");
-    router.replace("/(tabs)/match");
+    void AsyncStorage.removeItem("lastMatchSession").then(() => {
+      router.replace("/(tabs)/match");
+    });
   };
 
   return (

@@ -52,6 +52,7 @@ export default function RootLayout() {
             headerTintColor: "#d4af37",
             headerStyle: { backgroundColor: "#052e16" },
             headerTitleStyle: { color: "#d4af37", fontWeight: "800" },
+            gestureEnabled: false,
           }}
         />
         <Stack.Screen
