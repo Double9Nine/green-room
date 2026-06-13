@@ -202,6 +202,28 @@ function ConversationRow({
                   <Text style={styles.convoName} numberOfLines={1}>
                     {convo.playerName}
                   </Text>
+                  {convo.isProPlayer ? (
+                    <View
+                      style={{
+                        backgroundColor: "rgba(212,175,55,0.15)",
+                        borderWidth: 0.5,
+                        borderColor: "#d4af37",
+                        borderRadius: 8,
+                        paddingHorizontal: 5,
+                        paddingVertical: 1,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: "#d4af37",
+                          fontSize: 9,
+                          fontWeight: "700",
+                        }}
+                      >
+                        ⭐ PRO
+                      </Text>
+                    </View>
+                  ) : null}
                   {isMuted ? (
                     <Ionicons
                       name="notifications-off-outline"

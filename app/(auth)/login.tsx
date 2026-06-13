@@ -32,7 +32,10 @@ export default function LoginScreen() {
       return;
     }
     setError("");
-    void AsyncStorage.removeItem("lastMatchSession").then(() => {
+    void Promise.all([
+      AsyncStorage.removeItem("lastMatchSession"),
+      AsyncStorage.removeItem("lastProPackSession"),
+    ]).then(() => {
       router.replace("/(tabs)/match");
     });
   };

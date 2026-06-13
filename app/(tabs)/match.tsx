@@ -61,6 +61,13 @@ export default function MatchScreen() {
   useFocusEffect(
     useCallback(() => {
       const checkSession = async () => {
+        const proRaw = await AsyncStorage.getItem("lastProPackSession");
+        if (proRaw && !redirectedRef.current) {
+          redirectedRef.current = true;
+          router.replace("/pro-pack-opening");
+          return;
+        }
+
         const raw = await AsyncStorage.getItem("lastMatchSession");
         if (!raw) {
           redirectedRef.current = false;
@@ -72,7 +79,7 @@ export default function MatchScreen() {
           return;
         }
         redirectedRef.current = true;
-        const session = JSON.parse(raw);
+        const session = JSON.parse(raw) as { sport: string; sportLabel: string };
         router.replace({
           pathname: "/match-results",
           params: {

@@ -398,7 +398,11 @@ export default function ChatConversationScreen() {
     eventId?: string;
     shareEvent?: string;
     fromGroupChat?: string;
+    isProPlayer?: string;
+    playerTitle?: string;
   }>();
+  const isProPlayer = rawParams.isProPlayer ?? "";
+  const playerTitle = rawParams.playerTitle ?? "";
   const shareEventParam = typeof rawParams.shareEvent === "string" ? rawParams.shareEvent : undefined;
 
   const playerParams = useMemo(
@@ -530,6 +534,8 @@ export default function ChatConversationScreen() {
         unread: false,
         isOrganizerChat: isOrganizerChatParam === "true",
         eventId: eventId || null,
+        isProPlayer: isProPlayer === "true",
+        playerTitle: playerTitle || "",
       };
 
       const existing = convos.findIndex(
@@ -1482,6 +1488,19 @@ export default function ChatConversationScreen() {
             {subtitle ? (
               <Text style={styles.headerSubtitle} numberOfLines={2}>
                 {subtitle}
+              </Text>
+            ) : null}
+            {isProPlayer === "true" && playerTitle ? (
+              <Text
+                style={{
+                  color: GOLD,
+                  fontSize: 11,
+                  fontWeight: "600",
+                  opacity: 0.9,
+                  marginTop: 1,
+                }}
+              >
+                ⭐ {playerTitle}
               </Text>
             ) : null}
           </View>

@@ -16,6 +16,8 @@ export type StoredConversation = {
   muted?: boolean;
   isOrganizerChat?: boolean;
   eventId?: string;
+  isProPlayer?: boolean;
+  playerTitle?: string;
 };
 
 export async function loadStoredConversations(): Promise<StoredConversation[]> {

@@ -30,7 +30,13 @@ const CARD_MARGIN = 16;
 const SNAP_INTERVAL = CARD_WIDTH + CARD_MARGIN;
 const SIDE_PADDING = (width - CARD_WIDTH) / 2;
 
-const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<Player>);
+type ProPackItem = { id: "pro-pack"; isProPack: true };
+type ListItem = Player | ProPackItem;
+function isProPackItem(item: ListItem): item is ProPackItem {
+  return "isProPack" in item;
+}
+
+const AnimatedFlatList = Animated.createAnimatedComponent(FlatList<ListItem>);
 
 const GOLD = "#d4af37";
 const DARK_GREEN = "#052e16";
@@ -460,7 +466,7 @@ export default function MatchResultsScreen() {
   const [userPurpose, setUserPurpose] = useState("");
   const [userTags, setUserTags] = useState<string[]>([]);
   const scrollX = useRef(new Animated.Value(0)).current;
-  const listRef = useRef<FlatList<Player>>(null);
+  const listRef = useRef<FlatList<ListItem>>(null);
 
   useEffect(() => {
     const loadAndFilter = async () => {
@@ -551,9 +557,18 @@ export default function MatchResultsScreen() {
     });
   }, []);
 
+  const listData: ListItem[] = useMemo(
+    () => [
+      ...players.slice(0, 2),
+      { id: "pro-pack" as const, isProPack: true as const },
+      ...players.slice(2),
+    ],
+    [players]
+  );
+
   const snapOffsets = useMemo(
-    () => players.map((_, i) => i * SNAP_INTERVAL),
-    [players.length]
+    () => listData.map((_, i) => i * SNAP_INTERVAL),
+    [listData.length]
   );
 
   const sportDisplay = useMemo(
@@ -599,10 +614,10 @@ export default function MatchResultsScreen() {
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const x = e.nativeEvent.contentOffset.x;
       const index = Math.round(x / SNAP_INTERVAL);
-      const clamped = Math.max(0, Math.min(index, players.length - 1));
+      const clamped = Math.max(0, Math.min(index, listData.length - 1));
       if (clamped !== activeIndex) setActiveIndex(clamped);
     },
-    [activeIndex, players.length]
+    [activeIndex, listData.length]
   );
 
   const onScroll = useMemo(
@@ -626,11 +641,11 @@ export default function MatchResultsScreen() {
   };
 
   useEffect(() => {
-    if (players.length === 0) return;
-    if (activeIndex >= players.length) {
-      setActiveIndex(Math.max(0, players.length - 1));
+    if (listData.length === 0) return;
+    if (activeIndex >= listData.length) {
+      setActiveIndex(Math.max(0, listData.length - 1));
     }
-  }, [players.length, activeIndex]);
+  }, [listData.length, activeIndex]);
 
   return (
     <>
@@ -672,8 +687,10 @@ export default function MatchResultsScreen() {
             <View style={styles.carouselWrap}>
               <AnimatedFlatList
                 ref={listRef}
-                data={players}
-                keyExtractor={(item) => String(item.id)}
+                data={listData}
+                keyExtractor={(item) =>
+                  isProPackItem(item) ? "pro-pack" : String(item.id)
+                }
                 extraData={activeIndex}
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -692,18 +709,126 @@ export default function MatchResultsScreen() {
                 ItemSeparatorComponent={() => (
                   <View style={{ width: CARD_MARGIN }} />
                 )}
-                renderItem={({ item, index }) => (
-                  <AnimatedPlayerCard
-                    index={index}
-                    scrollX={scrollX}
-                    player={item}
-                    sportName={sportDisplay.name}
-                    sportEmoji={sportDisplay.emoji}
-                    featured={index === activeIndex}
-                    onMessageAndPlan={() => void openChat(item)}
-                    onRemoveComplete={(id) => void handleSkip(id)}
-                  />
-                )}
+                renderItem={({ item, index }) => {
+                  if (isProPackItem(item)) {
+                    const inputRange = [
+                      (index - 1) * SNAP_INTERVAL,
+                      index * SNAP_INTERVAL,
+                      (index + 1) * SNAP_INTERVAL,
+                    ];
+                    const carouselScale = scrollX.interpolate({
+                      inputRange,
+                      outputRange: [0.82, 1.08, 0.82],
+                      extrapolate: "clamp",
+                    });
+                    return (
+                      <Animated.View
+                        style={{
+                          width: CARD_WIDTH,
+                          height: CARD_HEIGHT,
+                          transform: [{ scale: carouselScale }],
+                        }}
+                      >
+                        <Pressable
+                          onPress={() =>
+                            router.push({
+                              pathname: "/pro-pack-opening",
+                              params: { sport: params.sport || "tennis" },
+                            })
+                          }
+                          style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
+                        >
+                          <LinearGradient
+                            colors={["#6b4900", "#c8980a", "#d4af37"]}
+                            style={[
+                              styles.cardGradient,
+                              {
+                                width: CARD_WIDTH,
+                                height: CARD_HEIGHT,
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 14,
+                              },
+                            ]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                          >
+                            <View
+                              style={{
+                                width: 60,
+                                height: 60,
+                                borderRadius: 30,
+                                backgroundColor: "rgba(5,46,22,0.3)",
+                                borderWidth: 2,
+                                borderColor: "#052e16",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                            >
+                              <Ionicons
+                                name="lock-closed"
+                                size={26}
+                                color="#052e16"
+                              />
+                            </View>
+                            <Text
+                              style={{
+                                color: "#052e16",
+                                fontSize: 15,
+                                fontWeight: "800",
+                                textAlign: "center",
+                                paddingHorizontal: 16,
+                              }}
+                            >
+                              Play with a Pro
+                            </Text>
+                            <Text
+                              style={{
+                                color: "#3d2a00",
+                                fontSize: 11,
+                                textAlign: "center",
+                                paddingHorizontal: 20,
+                                lineHeight: 16,
+                              }}
+                            >
+                              Unlock ATP pros & celebrities in your sport
+                            </Text>
+                            <View
+                              style={{
+                                backgroundColor: "#052e16",
+                                borderRadius: 20,
+                                paddingHorizontal: 18,
+                                paddingVertical: 9,
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: "#d4af37",
+                                  fontSize: 12,
+                                  fontWeight: "800",
+                                }}
+                              >
+                                Open Pro Pack ★
+                              </Text>
+                            </View>
+                          </LinearGradient>
+                        </Pressable>
+                      </Animated.View>
+                    );
+                  }
+                  return (
+                    <AnimatedPlayerCard
+                      index={index}
+                      scrollX={scrollX}
+                      player={item}
+                      sportName={sportDisplay.name}
+                      sportEmoji={sportDisplay.emoji}
+                      featured={index === activeIndex}
+                      onMessageAndPlan={() => void openChat(item)}
+                      onRemoveComplete={(id) => void handleSkip(id)}
+                    />
+                  );
+                }}
               />
             </View>
           )}

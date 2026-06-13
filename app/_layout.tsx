@@ -83,6 +83,10 @@ export default function RootLayout() {
           name="my-profile"
           options={{ headerShown: false }}
         />
+        <Stack.Screen
+          name="pro-pack-opening"
+          options={{ headerShown: false }}
+        />
       </Stack>
       <StatusBar style="auto" />
     </GestureHandlerRootView>
