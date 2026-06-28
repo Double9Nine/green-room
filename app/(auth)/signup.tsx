@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
+import { supabase } from '@/lib/supabase';
 import {
   View,
   Text,
@@ -35,6 +36,7 @@ export default function SignupScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
   const [emailExists, setEmailExists] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const passwordChecks = useMemo(
     () => ({
@@ -47,7 +49,7 @@ export default function SignupScreen() {
     [password]
   );
 
-  const handleSignUp = () => {
+  const handleSignUp = async () => {
     setEmailExists(false);
     if (!email.trim()) {
       setError("Please enter your email");
@@ -83,11 +85,38 @@ export default function SignupScreen() {
       setError("Passwords do not match");
       return;
     }
-    setError("");
-    router.replace({
-      pathname: "/(auth)/onboarding",
-      params: { startSlide: "1" },
-    });
+    setError("")
+    setLoading(true)
+    try {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+      })
+
+      if (signUpError) {
+        setError(signUpError.message)
+        setLoading(false)
+        return
+      }
+
+      // Supabase returns empty identities for duplicate emails
+      if (data.user && data.user.identities && data.user.identities.length === 0) {
+        setEmailExists(true)
+        setLoading(false)
+        return
+      }
+
+      if (data.user) {
+        router.replace({
+          pathname: '/(auth)/onboarding',
+          params: { startSlide: '1' },
+        })
+      }
+    } catch (err) {
+      setError('Something went wrong. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   };
 
   return (
@@ -245,8 +274,14 @@ export default function SignupScreen() {
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-          <Pressable onPress={handleSignUp} style={styles.createAccountBtn}>
-            <Text style={styles.createAccountBtnText}>Create Account</Text>
+          <Pressable
+            onPress={handleSignUp}
+            disabled={loading}
+            style={[styles.createAccountBtn, loading && { opacity: 0.6 }]}
+          >
+            <Text style={styles.createAccountBtnText}>
+              {loading ? 'Creating account...' : 'Create Account'}
+            </Text>
           </Pressable>
 
           <Pressable

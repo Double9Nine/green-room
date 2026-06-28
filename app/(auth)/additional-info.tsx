@@ -9,6 +9,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LocationPicker } from "@/components/LocationPicker";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { mergeUserProfile } from "@/lib/profileStorage";
+import { supabase } from '@/lib/supabase';
 
 export default function AdditionalInfoScreen() {
   const insets = useSafeAreaInsets();
@@ -18,7 +19,35 @@ export default function AdditionalInfoScreen() {
   const [locationLabel, setLocationLabel] = useState("");
   const [photoError, setPhotoError] = useState(false);
 
-  const handleContinue = () => {
+  const saveToSupabase = async (profile: any) => {
+    try {
+      const { data } = await supabase.auth.getUser()
+
+      if (!data?.user) {
+        return
+      }
+
+      const { error: upsertError } = await supabase.from('profiles').upsert({
+        id: data.user.id,
+        email: data.user.email,
+        name: profile.name,
+        location: profile.location,
+        work: profile.work,
+        university: profile.university,
+        photo_url: profile.photo,
+        sport: profile.sport,
+        skill_level: profile.skillLevel,
+        availability: profile.availability,
+        purpose: profile.purpose,
+        tags: profile.tags,
+        games_played: profile.gamesPlayed ?? 0,
+        updated_at: new Date().toISOString(),
+      })
+    } catch (_err) {
+    }
+  }
+
+  const handleContinue = async () => {
     if (!photoUri) {
       setPhotoError(true);
       Alert.alert(
@@ -28,14 +57,15 @@ export default function AdditionalInfoScreen() {
       );
       return;
     }
-    void mergeUserProfile({
+    const merged = await mergeUserProfile({
       work: occupation.trim(),
       university: university.trim(),
       photo: photoUri,
       location: locationLabel,
     });
-    void AsyncStorage.removeItem("tempProfile");
-    router.replace("/(tabs)/match");
+    await saveToSupabase(merged)
+    void AsyncStorage.removeItem('tempProfile')
+    router.replace('/(tabs)/match')
   };
 
   return (

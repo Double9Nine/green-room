@@ -1,4 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
+import { supabase } from '@/lib/supabase';
 import { router } from "expo-router";
 import { useState } from "react";
 import {
@@ -34,14 +35,18 @@ export default function ForgotPasswordScreen() {
 
     setLoading(true);
 
-    // TODO: Replace with Supabase:
-    // const { error } = await supabase.auth.resetPasswordForEmail(email)
-    // if (error) setError('No account found with this email')
-    // else setSuccess(true)
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    setLoading(false);
-    setSuccess(true);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+      email.trim().toLowerCase(),
+      {
+        redirectTo: 'greenroom://reset-password',
+      }
+    )
+    setLoading(false)
+    if (resetError) {
+      setError('Something went wrong. Please try again.')
+    } else {
+      setSuccess(true)
+    }
   };
 
   return (

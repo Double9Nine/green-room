@@ -3,6 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useState } from "react";
+import { supabase } from '@/lib/supabase';
 import {
   Pressable,
   ScrollView,
@@ -21,23 +22,45 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!isValidEmail(email)) {
-      setError("Please enter a valid email address");
-      return;
+      setError("Please enter a valid email address")
+      return
     }
     if (!password) {
-      setError("Please enter your password");
-      return;
+      setError("Please enter your password")
+      return
     }
-    setError("");
-    void Promise.all([
-      AsyncStorage.removeItem("lastMatchSession"),
-      AsyncStorage.removeItem("lastProPackSession"),
-    ]).then(() => {
-      router.replace("/(tabs)/match");
-    });
+    setError("")
+    setLoading(true)
+    try {
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      })
+      if (signInError) {
+        if (signInError.message.includes('Invalid login credentials')) {
+          setError("Incorrect email or password")
+        } else {
+          setError(signInError.message)
+        }
+        setLoading(false)
+        return
+      }
+      if (data.user) {
+        await Promise.all([
+          AsyncStorage.removeItem("lastMatchSession"),
+          AsyncStorage.removeItem("lastProPackSession"),
+        ])
+        router.replace("/(tabs)/match")
+      }
+    } catch (err) {
+      setError("Something went wrong. Please try again.")
+    } finally {
+      setLoading(false)
+    }
   };
 
   return (
@@ -110,9 +133,10 @@ export default function LoginScreen() {
 
         <Pressable
           onPress={handleLogin}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          disabled={loading}
+          style={[styles.button, loading && { opacity: 0.6 }]}
         >
-          <Text style={styles.buttonText}>Log In</Text>
+          <Text style={styles.buttonText}>{loading ? 'Logging in...' : 'Log In'}</Text>
         </Pressable>
 
         <Pressable

@@ -35,6 +35,7 @@ import {
   type ProfileNotifications,
   type UserProfile,
 } from "@/lib/profileStorage";
+import { supabase } from '@/lib/supabase';
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -253,8 +254,9 @@ export default function ProfileScreen() {
       {
         text: "Log Out",
         style: "destructive",
-        onPress: () => {
-          router.replace("/(auth)/onboarding");
+        onPress: async () => {
+          await supabase.auth.signOut()
+          router.replace("/(auth)/onboarding")
         },
       },
     ]);
@@ -279,8 +281,17 @@ export default function ProfileScreen() {
                   text: "Yes, Delete Everything",
                   style: "destructive",
                   onPress: async () => {
-                    await AsyncStorage.clear();
-                    router.replace("/(auth)/onboarding");
+                    try {
+                      const { data: { user } } = await supabase.auth.getUser()
+                      if (user) {
+                        await supabase.auth.signOut()
+                      }
+                      await AsyncStorage.clear()
+                      router.replace("/(auth)/onboarding")
+                    } catch (err) {
+                      await AsyncStorage.clear()
+                      router.replace("/(auth)/onboarding")
+                    }
                   },
                 },
               ]
