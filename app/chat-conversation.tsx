@@ -1149,7 +1149,7 @@ export default function ChatConversationScreen() {
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
-          const { error } = await supabase.from('messages').upsert({
+          await supabase.from('messages').upsert({
             id: messagesRef.current[messagesRef.current.length - 1]?.id,
             conversation_id: `${user.id}_${playerId}`,
             user_id: user.id,
@@ -1159,11 +1159,9 @@ export default function ChatConversationScreen() {
             created_at: Date.now(),
             recalled: false,
           })
-          if (error) console.log('Messages upsert error:', error.message)
-          else console.log('Message saved to Supabase!')
         }
-      } catch (err: any) {
-        console.log('Messages sync error:', err?.message)
+      } catch {
+        // fail silently
       }
     })()
     requestAnimationFrame(() => inputRef.current?.focus());
