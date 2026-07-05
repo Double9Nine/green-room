@@ -1396,6 +1396,20 @@ export default function ExploreScreen() {
     const updated = stored.filter((e) => e.id !== eventId);
     await AsyncStorage.setItem(MY_EVENTS_KEY, JSON.stringify(updated));
     setMyEvents(updated);
+
+    // Sync to Supabase
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase
+          .from('events')
+          .delete()
+          .eq('id', String(eventId))
+          .eq('organizer_id', user.id)
+      }
+    } catch {
+      // fail silently
+    }
   }, []);
 
   const checkExpiredEventsRef = useRef<(() => Promise<void>) | null>(null);
