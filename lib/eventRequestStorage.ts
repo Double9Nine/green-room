@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { getCurrentUser as loadCurrentUserProfile } from "./getCurrentUser";
+import { supabase } from '@/lib/supabase';
 import {
   incrementJoinedStatusChanges,
 } from "./notificationStore";
@@ -244,6 +245,25 @@ export async function leaveEvent(eventId: number): Promise<void> {
       (r) => !(r.eventId === eventId && r.userId === CURRENT_USER_ID)
     )
   );
+
+  // Sync to Supabase
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      await supabase
+        .from('event_attendees')
+        .delete()
+        .eq('event_id', String(eventId))
+        .eq('user_id', user.id)
+
+      // Decrease current_spots
+      await supabase.rpc('decrement_event_spots', {
+        event_id: String(eventId)
+      })
+    }
+  } catch {
+    // fail silently
+  }
 }
 
 export async function removeEventMember(
