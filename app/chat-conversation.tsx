@@ -5,25 +5,25 @@ import * as ImagePicker from "expo-image-picker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
-  Animated,
-  Image,
-  KeyboardAvoidingView,
-  Linking,
-  Modal,
-  PanResponder,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  Vibration,
-  View,
+    Alert,
+    Animated,
+    Image,
+    KeyboardAvoidingView,
+    Linking,
+    Modal,
+    PanResponder,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    Vibration,
+    View,
 } from "react-native";
 import {
-  SafeAreaView,
-  useSafeAreaInsets,
+    SafeAreaView,
+    useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
 import { ChatVenueFinderModal } from "@/components/ChatVenueFinderModal";
@@ -32,9 +32,8 @@ import type { VenueSharePayload } from "@/constants/nearbyVenues";
 import { CONVERSATIONS_STORAGE_KEY } from "@/lib/conversationsStorage";
 import { convertVoiceToText } from "@/lib/convertVoiceToText";
 import { incrementUnreadPrivate } from "@/lib/notificationStore";
-import { formatEventTime } from "./(tabs)/explore";
-import { getCurrentUser } from "../lib/getCurrentUser";
 import { supabase } from '@/lib/supabase';
+import { getCurrentUser } from "../lib/getCurrentUser";
 
 const DARK_GREEN = "#052e16";
 const ACCENT_GREEN = "#15803d";
@@ -556,6 +555,32 @@ export default function ChatConversationScreen() {
     } catch (e) {
       console.log("Save conversation error:", e);
     }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const lastMsg = messagesRef.current[messagesRef.current.length - 1]
+        await supabase.from('conversations').upsert({
+          id: `${user.id}_${playerId}`,
+          user_id: user.id,
+          player_name: playerName,
+          player_location: playerLocation,
+          player_skill: playerSkill,
+          player_purpose: playerParams.playerPurpose,
+          player_age: playerParams.playerAge,
+          sport_emoji: sportEmoji,
+          last_message: lastMsg?.text ?? '',
+          last_message_time: Date.now(),
+          unread: false,
+          is_organizer_chat: isOrganizerChatParam === 'true',
+          is_pro_player: isProPlayer === 'true',
+          player_title: playerTitle ?? '',
+          updated_at: new Date().toISOString(),
+        })
+      }
+    } catch {
+      // fail silently
+    }
   }, [
     eventId,
     isOrganizerChatParam,
@@ -663,6 +688,33 @@ export default function ChatConversationScreen() {
         const preview = getSentMessagePreview(msg);
         void persistAfterSend(preview ?? "");
         void saveLimitAfterSend();
+        void (async () => {
+          try {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user) {
+              const newMsg = messagesRef.current[messagesRef.current.length - 1]
+              if (newMsg && newMsg.sent) {
+                await supabase.from('messages').upsert({
+                  id: newMsg.id,
+                  conversation_id: `${user.id}_${playerId}`,
+                  user_id: user.id,
+                  sent: newMsg.sent,
+                  type: newMsg.type ?? 'text',
+                  text: newMsg.text ?? null,
+                  created_at: newMsg.createdAt,
+                  recalled: newMsg.recalled ?? false,
+                  voice_uri: newMsg.voiceUri ?? null,
+                  voice_duration_sec: newMsg.voiceDurationSec ?? null,
+                  photo_uri: newMsg.imageUri ?? null,
+                  venue_name: newMsg.venueName ?? null,
+                  venue_area: newMsg.venueArea ?? null,
+                })
+              }
+            }
+          } catch {
+            // fail silently
+          }
+        })()
       }
     },
     // saveLimitAfterSend reads from ref so no dep needed
@@ -1093,6 +1145,27 @@ export default function ChatConversationScreen() {
     scrollToEnd();
     void persistAfterSend(text);
     void saveLimitAfterSend();
+    void (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { error } = await supabase.from('messages').upsert({
+            id: messagesRef.current[messagesRef.current.length - 1]?.id,
+            conversation_id: `${user.id}_${playerId}`,
+            user_id: user.id,
+            sent: true,
+            type: 'text',
+            text: text,
+            created_at: Date.now(),
+            recalled: false,
+          })
+          if (error) console.log('Messages upsert error:', error.message)
+          else console.log('Message saved to Supabase!')
+        }
+      } catch (err: any) {
+        console.log('Messages sync error:', err?.message)
+      }
+    })()
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [inputText, persistAfterSend, scrollToEnd]);
 
