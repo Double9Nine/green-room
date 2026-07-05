@@ -34,6 +34,7 @@ import { convertVoiceToText } from "@/lib/convertVoiceToText";
 import { incrementUnreadPrivate } from "@/lib/notificationStore";
 import { formatEventTime } from "./(tabs)/explore";
 import { getCurrentUser } from "../lib/getCurrentUser";
+import { supabase } from '@/lib/supabase';
 
 const DARK_GREEN = "#052e16";
 const ACCENT_GREEN = "#15803d";
@@ -618,6 +619,22 @@ export default function ChatConversationScreen() {
       const messaged = messagedRaw ? JSON.parse(messagedRaw) : {};
       messaged[playerId] = Date.now();
       await AsyncStorage.setItem("messagedPlayers", JSON.stringify(messaged));
+
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          await supabase.from('match_limits').upsert({
+            sender_id: user.id,
+            receiver_id: String(playerId),
+            first_message_at: null,
+            follow_up_sent_at: null,
+            is_unlocked: true,
+            updated_at: new Date().toISOString(),
+          })
+        }
+      } catch {
+        // fail silently
+      }
     }
   }, [isMatchChat, messageLimit, playerId, LIMIT_KEY]);
 
@@ -655,10 +672,102 @@ export default function ChatConversationScreen() {
 
   // Load match-limit state on mount
   useEffect(() => {
-    AsyncStorage.getItem(LIMIT_KEY).then((raw) => {
-      if (raw) setMessageLimit(JSON.parse(raw));
-    });
-    // LIMIT_KEY is stable for the lifetime of this screen
+    const loadLimit = async () => {
+      // First try AsyncStorage
+      const raw = await AsyncStorage.getItem(LIMIT_KEY)
+
+      if (raw) {
+        const saved = JSON.parse(raw)
+        const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
+        const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000
+        const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000
+
+        if (saved.firstMessageSentAt && !saved.unlocked) {
+          const fiveDaysLater = saved.firstMessageSentAt + FIVE_DAYS_MS
+          const followUpWindowEnd = fiveDaysLater + TWO_DAYS_MS
+
+          let expiredAt: number | null = null
+          if (!saved.followUpSentAt && Date.now() >= followUpWindowEnd) {
+            expiredAt = followUpWindowEnd
+          }
+          if (saved.followUpSentAt) {
+            const twoDaysLater = saved.followUpSentAt + TWO_DAYS_MS
+            if (Date.now() >= twoDaysLater) {
+              expiredAt = twoDaysLater
+            }
+          }
+
+          if (expiredAt && Date.now() - expiredAt >= THREE_DAYS_MS) {
+            const reset = {
+              firstMessageSentAt: null,
+              followUpSentAt: null,
+              unlocked: false
+            }
+            setMessageLimit(reset)
+            await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(reset))
+            const expiredRaw = await AsyncStorage.getItem('expiredMatches')
+            const expired = expiredRaw ? JSON.parse(expiredRaw) : {}
+            delete expired[playerId]
+            await AsyncStorage.setItem('expiredMatches', JSON.stringify(expired))
+            const messagedRaw = await AsyncStorage.getItem('messagedPlayers')
+            const messaged = messagedRaw ? JSON.parse(messagedRaw) : {}
+            delete messaged[playerId]
+            await AsyncStorage.setItem('messagedPlayers', JSON.stringify(messaged))
+
+            // Also clear in Supabase
+            try {
+              const { data: { user } } = await supabase.auth.getUser()
+              if (user) {
+                await supabase.from('match_limits')
+                  .delete()
+                  .eq('sender_id', user.id)
+                  .eq('receiver_id', String(playerId))
+                await supabase.from('expired_matches')
+                  .delete()
+                  .eq('user_id', user.id)
+                  .eq('expired_user_id', String(playerId))
+                await supabase.from('messaged_players')
+                  .delete()
+                  .eq('user_id', user.id)
+                  .eq('messaged_user_id', String(playerId))
+              }
+            } catch {
+              // fail silently
+            }
+            return
+          }
+        }
+        setMessageLimit(saved)
+        return
+      }
+
+      // If no AsyncStorage, try Supabase (e.g. new device)
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const { data } = await supabase
+          .from('match_limits')
+          .select('*')
+          .eq('sender_id', user.id)
+          .eq('receiver_id', String(playerId))
+          .single()
+
+        if (data) {
+          const fromSupabase = {
+            firstMessageSentAt: data.first_message_at,
+            followUpSentAt: data.follow_up_sent_at,
+            unlocked: data.is_unlocked,
+          }
+          setMessageLimit(fromSupabase)
+          await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(fromSupabase))
+        }
+      } catch {
+        // fail silently
+      }
+    }
+    void loadLimit()
+    // LIMIT_KEY and playerId are stable for the lifetime of this screen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -777,6 +886,7 @@ export default function ChatConversationScreen() {
 
   const canSendMessage = (() => {
     if (!isMatchChat) return true;
+    if (!messagesLoaded) return false; // wait for messages to load
     if (messageLimit.unlocked) return true;
     if (!messageLimit.firstMessageSentAt) return true;
 
@@ -860,16 +970,36 @@ export default function ChatConversationScreen() {
   }, [limitStatusMessage]);
 
   const saveLimitAfterSend = async () => {
-    if (!isMatchChat) return;
-    const current = messageLimitRef.current;
+    if (!isMatchChat) return
+    const current = messageLimitRef.current
+
+    let updated = current
+
     if (!current.firstMessageSentAt) {
-      const updated = { ...current, firstMessageSentAt: Date.now() };
-      setMessageLimit(updated);
-      await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(updated));
+      updated = { ...current, firstMessageSentAt: Date.now() }
+      setMessageLimit(updated)
+      await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(updated))
     } else if (!current.followUpSentAt) {
-      const updated = { ...current, followUpSentAt: Date.now() };
-      setMessageLimit(updated);
-      await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(updated));
+      updated = { ...current, followUpSentAt: Date.now() }
+      setMessageLimit(updated)
+      await AsyncStorage.setItem(LIMIT_KEY, JSON.stringify(updated))
+    }
+
+    // Sync to Supabase
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('match_limits').upsert({
+          sender_id: user.id,
+          receiver_id: String(playerId),
+          first_message_at: updated.firstMessageSentAt,
+          follow_up_sent_at: updated.followUpSentAt,
+          is_unlocked: updated.unlocked,
+          updated_at: new Date().toISOString(),
+        })
+      }
+    } catch {
+      // fail silently - AsyncStorage already saved
     }
   };
 

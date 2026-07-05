@@ -22,6 +22,7 @@ import {
     type MatchPlayer,
 } from "@/constants/matchPlayers";
 import { getMatchSport } from "@/constants/matchSports";
+import { supabase } from '@/lib/supabase';
 
 const { width, height } = Dimensions.get("window");
 const CARD_WIDTH = width * 0.71;
@@ -583,10 +584,22 @@ export default function MatchResultsScreen() {
   const selectedSportEmoji = sportDisplay.emoji;
 
   const saveMessaged = async (playerId: number) => {
-    const raw = await AsyncStorage.getItem(MESSAGED_KEY);
-    const messaged = raw ? JSON.parse(raw) : {};
-    messaged[playerId] = Date.now();
-    await AsyncStorage.setItem(MESSAGED_KEY, JSON.stringify(messaged));
+    const { data: { user } } = await supabase.auth.getUser()
+
+    // Always save to AsyncStorage for local UI
+    const raw = await AsyncStorage.getItem(MESSAGED_KEY)
+    const messaged = raw ? JSON.parse(raw) : {}
+    messaged[playerId] = Date.now()
+    await AsyncStorage.setItem(MESSAGED_KEY, JSON.stringify(messaged))
+
+    // Also save to Supabase
+    if (user) {
+      await supabase.from('messaged_players').upsert({
+        user_id: user.id,
+        messaged_user_id: String(playerId),
+        messaged_at: Date.now(),
+      })
+    }
   };
 
   const openChat = useCallback(
@@ -636,6 +649,15 @@ export default function MatchResultsScreen() {
     skipped[playerId] = Date.now();
 
     await AsyncStorage.setItem(SKIPPED_KEY, JSON.stringify(skipped));
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      await supabase.from('skipped_players').upsert({
+        user_id: user.id,
+        skipped_user_id: String(playerId),
+        skipped_at: Date.now(),
+      })
+    }
 
     setPlayers((prev) => prev.filter((p) => p.id !== playerId));
   };
