@@ -825,20 +825,57 @@ export default function ChatConversationScreen() {
 
   // Load persisted messages on mount, then mark ready
   useEffect(() => {
-    AsyncStorage.getItem(MESSAGES_KEY).then((raw) => {
+    const loadMessages = async () => {
+      const raw = await AsyncStorage.getItem(MESSAGES_KEY)
       if (raw) {
         try {
-          const saved = JSON.parse(raw) as ChatMessage[];
+          const saved = JSON.parse(raw) as ChatMessage[]
           if (Array.isArray(saved) && saved.length > 0) {
-            setMessages(saved);
+            setMessages(saved)
+            setMessagesLoaded(true)
+            return
           }
         } catch {
           /* ignore malformed data */
         }
       }
-      setMessagesLoaded(true);
-    });
-    // MESSAGES_KEY is stable for the lifetime of this screen
+
+      // If no local messages, try Supabase
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: supabaseMessages } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', `${user.id}_${playerId}`)
+            .order('created_at', { ascending: true })
+
+          if (supabaseMessages && supabaseMessages.length > 0) {
+            const mapped: ChatMessage[] = supabaseMessages.map((m: any) => ({
+              id: m.id,
+              type: m.type ?? 'text',
+              text: m.text ?? '',
+              sent: m.sent,
+              createdAt: m.created_at,
+              recalled: m.recalled ?? false,
+              voiceUri: m.voice_uri ?? undefined,
+              voiceDurationSec: m.voice_duration_sec ?? undefined,
+              photoUri: m.photo_uri ?? undefined,
+              venueName: m.venue_name ?? undefined,
+              venueArea: m.venue_area ?? undefined,
+            }))
+            setMessages(mapped)
+            await AsyncStorage.setItem(MESSAGES_KEY, JSON.stringify(mapped))
+          }
+        }
+      } catch {
+        // fail silently
+      }
+
+      setMessagesLoaded(true)
+    }
+    void loadMessages()
+    // MESSAGES_KEY and playerId are stable for the lifetime of this screen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

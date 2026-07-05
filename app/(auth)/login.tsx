@@ -88,6 +88,41 @@ export default function LoginScreen() {
           // fail silently - will use local data
         }
 
+        // Fetch conversations from Supabase and sync to AsyncStorage
+        try {
+          const { data: convosData } = await supabase
+            .from('conversations')
+            .select('*')
+            .eq('user_id', data.user.id)
+            .order('last_message_time', { ascending: false })
+
+          if (convosData && convosData.length > 0) {
+            const conversations = convosData.map((c: any) => ({
+              id: c.id,
+              playerName: c.player_name,
+              playerLocation: c.player_location,
+              playerSkill: c.player_skill,
+              playerPurpose: c.player_purpose,
+              playerAge: c.player_age,
+              sportEmoji: c.sport_emoji,
+              lastMessage: c.last_message,
+              lastMessageTime: c.last_message_time,
+              unread: c.unread,
+              muted: c.muted,
+              isOrganizerChat: c.is_organizer_chat,
+              eventId: c.event_id,
+              isProPlayer: c.is_pro_player,
+              playerTitle: c.player_title,
+            }))
+            await AsyncStorage.setItem(
+              'conversations',
+              JSON.stringify(conversations)
+            )
+          }
+        } catch {
+          // fail silently - will use local data
+        }
+
         router.replace("/(tabs)/match")
       }
     } catch (err) {
