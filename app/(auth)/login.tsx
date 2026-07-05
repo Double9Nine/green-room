@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useState } from "react";
 import { supabase } from '@/lib/supabase';
+import { saveUserProfile } from '@/lib/profileStorage';
 import {
   Pressable,
   ScrollView,
@@ -54,6 +55,39 @@ export default function LoginScreen() {
           AsyncStorage.removeItem("lastMatchSession"),
           AsyncStorage.removeItem("lastProPackSession"),
         ])
+
+        // Fetch profile from Supabase and sync to AsyncStorage
+        try {
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .single()
+
+          if (profileData) {
+            await saveUserProfile({
+              name: profileData.name ?? '',
+              photo: profileData.photo_url ?? null,
+              location: profileData.location ?? '',
+              sport: profileData.sport ?? 'tennis',
+              skillLevel: profileData.skill_level ?? '',
+              availability: profileData.availability ?? [],
+              purpose: profileData.purpose ?? '',
+              tags: profileData.tags ?? [],
+              work: profileData.work ?? '',
+              university: profileData.university ?? '',
+              notifications: {
+                newMatches: true,
+                newMessages: true,
+                gameReminders: true,
+              },
+              gamesPlayed: profileData.games_played ?? 0,
+            })
+          }
+        } catch {
+          // fail silently - will use local data
+        }
+
         router.replace("/(tabs)/match")
       }
     } catch (err) {
