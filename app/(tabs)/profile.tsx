@@ -246,6 +246,25 @@ export default function ProfileScreen() {
     if (patch.photo !== undefined) setPhoto(patch.photo);
     if (patch.location !== undefined) setLocation(patch.location);
     await saveUserProfile(next);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('profiles').update({
+          name: next.name,
+          location: next.location,
+          photo_url: next.photo,
+          sport: next.sport,
+          skill_level: next.skillLevel,
+          availability: next.availability,
+          purpose: next.purpose,
+          tags: next.tags,
+          updated_at: new Date().toISOString(),
+        }).eq('id', user.id)
+      }
+    } catch {
+      // fail silently - local data already saved
+    }
   };
 
   const handleLogOut = () => {

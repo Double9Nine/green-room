@@ -22,6 +22,7 @@ import {
 } from "react-native-safe-area-context";
 
 import { LocationPicker } from "@/components/LocationPicker";
+import { supabase } from '@/lib/supabase';
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -95,22 +96,33 @@ export default function EditProfileScreen() {
   }, []);
 
   const handleSave = async () => {
-    setIsSaving(true);
+    setIsSaving(true)
     try {
-      const existing = await AsyncStorage.getItem("userProfile");
-      const profile = existing ? JSON.parse(existing) : {};
+      const existing = await AsyncStorage.getItem("userProfile")
+      const profile = existing ? JSON.parse(existing) : {}
       const updated = {
         ...profile,
         name: name.trim(),
         photo,
         location: location.trim(),
-      };
-      await AsyncStorage.setItem("userProfile", JSON.stringify(updated));
-      router.back();
+      }
+      await AsyncStorage.setItem("userProfile", JSON.stringify(updated))
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('profiles').update({
+          name: name.trim(),
+          location: location.trim(),
+          photo_url: photo,
+          updated_at: new Date().toISOString(),
+        }).eq('id', user.id)
+      }
+
+      router.back()
     } catch {
-      showToast("Could not save changes");
+      showToast("Could not save changes")
     } finally {
-      setIsSaving(false);
+      setIsSaving(false)
     }
   };
 
