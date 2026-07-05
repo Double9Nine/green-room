@@ -1162,6 +1162,7 @@ export default function ExploreScreen() {
   const [myEvents, setMyEvents] = useState<PlazaEvent[]>([]);
   const [joinedIds, setJoinedIds] = useState<number[]>([]);
   const [likedIds, setLikedIds] = useState<Set<number>>(new Set());
+  const [eventLikesCount, setEventLikesCount] = useState<Record<string, number>>({});
   const [eventRequestsList, setEventRequestsList] = useState<EventRequest[]>([]);
   const [confirmedJoined, setConfirmedJoined] = useState<EventRequest[]>([]);
   const [pendingJoined, setPendingJoined] = useState<EventRequest[]>([]);
@@ -1228,6 +1229,44 @@ export default function ExploreScreen() {
         const parsedLiked = JSON.parse(likedRaw) as number[];
         setLikedIds(new Set(Array.isArray(parsedLiked) ? parsedLiked : []));
       }
+
+      // Fetch liked events from Supabase
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: likedData } = await supabase
+            .from('event_likes')
+            .select('event_id')
+            .eq('user_id', user.id)
+
+          if (likedData && likedData.length > 0) {
+            const likedFromSupabase = new Set(
+              likedData.map((l: any) => Number(l.event_id))
+            )
+            setLikedIds(likedFromSupabase)
+            await AsyncStorage.setItem(
+              LIKED_EVENTS_KEY,
+              JSON.stringify([...likedFromSupabase])
+            )
+          }
+
+          // Fetch all likes counts
+          const { data: likesData } = await supabase
+            .from('event_likes')
+            .select('event_id')
+
+          if (likesData) {
+            const counts: Record<string, number> = {}
+            likesData.forEach((l: any) => {
+              counts[l.event_id] = (counts[l.event_id] || 0) + 1
+            })
+            setEventLikesCount(counts)
+          }
+        }
+      } catch {
+        // fail silently - use local data
+      }
+
       // Legacy instant-join IDs are no longer used; Joined tab uses confirmed requests only.
       if (joinedRaw) {
         await AsyncStorage.setItem(JOINED_EVENTS_KEY, JSON.stringify([]));
@@ -1640,13 +1679,15 @@ export default function ExploreScreen() {
       }
     } else {
       list.sort((a, b) => {
-        const aLikes = likedIds.has(a.id) ? a.likes + 1 : a.likes;
-        const bLikes = likedIds.has(b.id) ? b.likes + 1 : b.likes;
+        const aLikes = eventLikesCount[String(a.id)] ??
+          (likedIds.has(a.id) ? a.likes + 1 : a.likes);
+        const bLikes = eventLikesCount[String(b.id)] ??
+          (likedIds.has(b.id) ? b.likes + 1 : b.likes);
         return bLikes - aLikes;
       });
     }
     return list;
-  }, [allDiscoverEvents, selectedSport, sortBy, likedIds, userLat, userLng]);
+  }, [allDiscoverEvents, selectedSport, sortBy, likedIds, userLat, userLng, eventLikesCount]);
 
   const fetchLocationSuggestions = async (input: string) => {
     if (input.length < 3) {
@@ -2277,7 +2318,9 @@ export default function ExploreScreen() {
     ]);
   };
 
-  const toggleLike = (id: number) => {
+  const toggleLike = async (id: number) => {
+    const isLiked = likedIds.has(id)
+
     setLikedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -2285,6 +2328,30 @@ export default function ExploreScreen() {
       void AsyncStorage.setItem(LIKED_EVENTS_KEY, JSON.stringify([...next]));
       return next;
     });
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        if (isLiked) {
+          // Unlike → delete from Supabase
+          await supabase
+            .from('event_likes')
+            .delete()
+            .eq('event_id', String(id))
+            .eq('user_id', user.id)
+        } else {
+          // Like → insert to Supabase
+          await supabase
+            .from('event_likes')
+            .upsert({
+              event_id: String(id),
+              user_id: user.id,
+            })
+        }
+      }
+    } catch {
+      // fail silently
+    }
   };
 
   const renderDiscover = () => (
@@ -2343,7 +2410,7 @@ export default function ExploreScreen() {
             joined={getRequestStatus(event.id) === "confirmed"}
             liked={likedIds.has(event.id)}
             requestStatus={getRequestStatus(event.id)}
-            onToggleLike={() => toggleLike(event.id)}
+            onToggleLike={() => void toggleLike(event.id)}
             onJoin={() => {}}
             onUnjoin={() => void handleUnjoin(event.id)}
             onEventDetails={() => openEventDetails(event)}
@@ -2392,7 +2459,7 @@ export default function ExploreScreen() {
                   mode="my"
                   joined={joinedIds.includes(event.id)}
                   liked={likedIds.has(event.id)}
-                  onToggleLike={() => toggleLike(event.id)}
+                  onToggleLike={() => void toggleLike(event.id)}
                   onJoin={() => {}}
                   onUnjoin={() => {}}
                   onCardPress={() => openEventDetails(merged)}
@@ -2466,7 +2533,7 @@ export default function ExploreScreen() {
                   mode="joined"
                   joined
                   liked={likedIds.has(event.id)}
-                  onToggleLike={() => toggleLike(event.id)}
+                  onToggleLike={() => void toggleLike(event.id)}
                   onJoin={() => {}}
                   onCardPress={() => openEventDetails(event, true)}
                   onUnjoin={() => {}}
