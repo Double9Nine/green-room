@@ -421,6 +421,9 @@ export default function ChatConversationScreen() {
 
   const playerId =
     playerParams.playerId || `convo-${playerParams.playerName}`;
+  const purePlayerId = String(playerId).includes('_')
+    ? String(playerId).split('_').pop() ?? String(playerId)
+    : String(playerId);
   const isOrganizerChatParam =
     typeof rawParams.isOrganizerChat === "string"
       ? rawParams.isOrganizerChat
@@ -428,6 +431,10 @@ export default function ChatConversationScreen() {
         ? "true"
         : "";
   const isMatchChat = isOrganizerChatParam !== "true";
+
+  const getConversationId = (userId: string, otherId: string) => {
+    return [userId, otherId].sort().join('_')
+  }
 
   const matchSport = useMemo(
     () => MATCH_SPORTS.find((s) => s.emoji === sportEmoji),
@@ -553,7 +560,7 @@ export default function ChatConversationScreen() {
         JSON.stringify(convos)
       );
     } catch (e) {
-      console.log("Save conversation error:", e);
+      // ignore
     }
 
     try {
@@ -561,7 +568,7 @@ export default function ChatConversationScreen() {
       if (user) {
         const lastMsg = messagesRef.current[messagesRef.current.length - 1]
         await supabase.from('conversations').upsert({
-          id: `${user.id}_${playerId}`,
+          id: getConversationId(user.id, purePlayerId),
           user_id: user.id,
           player_name: playerName,
           player_location: playerLocation,
@@ -696,7 +703,7 @@ export default function ChatConversationScreen() {
               if (newMsg && newMsg.sent) {
                 await supabase.from('messages').upsert({
                   id: newMsg.id,
-                  conversation_id: `${user.id}_${playerId}`,
+                  conversation_id: getConversationId(user.id, purePlayerId),
                   user_id: user.id,
                   sent: newMsg.sent,
                   type: newMsg.type ?? 'text',
@@ -721,6 +728,60 @@ export default function ChatConversationScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [persistAfterSend, scrollToEnd, isMatchChat, handleReceivedMessage]
   );
+
+  const appendMessageRef = useRef(appendMessage)
+  useEffect(() => {
+    appendMessageRef.current = appendMessage
+  }, [appendMessage])
+
+  // Realtime subscription for incoming messages
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const conversationId = getConversationId(user.id, purePlayerId)
+      channel = supabase
+        .channel(`messages:${conversationId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+            filter: `conversation_id=eq.${conversationId}`,
+          },
+          (payload) => {
+            const newMsg = payload.new as any
+            if (newMsg.user_id !== user.id) {
+              appendMessageRef.current({
+                type: newMsg.type ?? 'text',
+                text: newMsg.text ?? '',
+                sent: false,
+                createdAt: newMsg.created_at,
+                recalled: newMsg.recalled ?? false,
+                voiceUri: newMsg.voice_uri ?? undefined,
+                voiceDurationSec: newMsg.voice_duration_sec ?? undefined,
+                photoUri: newMsg.photo_uri ?? undefined,
+                venueName: newMsg.venue_name ?? undefined,
+                venueArea: newMsg.venue_area ?? undefined,
+              })
+            }
+          }
+        )
+        .subscribe()
+    }
+
+    void setupRealtime()
+
+    return () => {
+      if (channel) {
+        void supabase.removeChannel(channel)
+      }
+    }
+  }, [playerId])
 
   // Load match-limit state on mount
   useEffect(() => {
@@ -847,7 +908,7 @@ export default function ChatConversationScreen() {
           const { data: supabaseMessages } = await supabase
             .from('messages')
             .select('*')
-            .eq('conversation_id', `${user.id}_${playerId}`)
+            .eq('conversation_id', getConversationId(user.id, purePlayerId))
             .order('created_at', { ascending: true })
 
           if (supabaseMessages && supabaseMessages.length > 0) {
@@ -1188,7 +1249,7 @@ export default function ChatConversationScreen() {
         if (user) {
           await supabase.from('messages').upsert({
             id: messagesRef.current[messagesRef.current.length - 1]?.id,
-            conversation_id: `${user.id}_${playerId}`,
+            conversation_id: getConversationId(user.id, purePlayerId),
             user_id: user.id,
             sent: true,
             type: 'text',
