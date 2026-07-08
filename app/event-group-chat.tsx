@@ -54,6 +54,7 @@ import {
   type GroupChatMessage,
 } from "../lib/groupChatStorage";
 import { EVENT_MEMBERS_KEY } from "../lib/eventRequestStorage";
+import { supabase } from '@/lib/supabase';
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -193,6 +194,34 @@ export default function EventGroupChatScreen() {
         lastMessage: getGroupChatPreviewText(next),
         lastMessageTime: Date.now(),
       });
+
+      // Sync latest message to Supabase
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user && next.length > 0) {
+          const lastMsg = next[next.length - 1]
+          if (lastMsg.sent) {
+            await supabase.from('group_messages').upsert({
+              id: lastMsg.id,
+              event_id: eventId,
+              user_id: user.id,
+              sender_name: lastMsg.sender,
+              sender_initial: lastMsg.initial,
+              type: lastMsg.type ?? 'text',
+              text: lastMsg.text ?? null,
+              created_at: lastMsg.createdAt,
+              recalled: lastMsg.recalled ?? false,
+              voice_uri: lastMsg.voiceUri ?? null,
+              voice_duration_sec: lastMsg.voiceDurationSec ?? null,
+              photo_uri: lastMsg.imageUri ?? null,
+              venue_name: lastMsg.venueName ?? null,
+              venue_area: lastMsg.venueArea ?? null,
+            })
+          }
+        }
+      } catch {
+        // fail silently
+      }
     },
     [eventId, eventTitle, organizer, sportEmoji]
   );
@@ -241,6 +270,43 @@ export default function EventGroupChatScreen() {
     const loadedMessages = await loadGroupChatMessages(eventId);
     const forViewer = applyMessagesForViewer(loadedMessages, user.name);
     setMessages(forViewer);
+
+    // If no local messages, try Supabase
+    if (forViewer.length === 0) {
+      try {
+        const { data: { user: supabaseUser } } = await supabase.auth.getUser()
+        if (supabaseUser && eventId) {
+          const { data: supabaseMessages } = await supabase
+            .from('group_messages')
+            .select('*')
+            .eq('event_id', eventId)
+            .order('created_at', { ascending: true })
+
+          if (supabaseMessages && supabaseMessages.length > 0) {
+            const mapped: GroupChatMessage[] = supabaseMessages.map((m: any) => ({
+              id: m.id,
+              sender: m.sender_name ?? '',
+              initial: m.sender_initial ?? '',
+              sent: m.user_id === supabaseUser.id,
+              time: new Date(m.created_at).toLocaleTimeString(),
+              createdAt: m.created_at,
+              type: m.type ?? 'text',
+              text: m.text ?? undefined,
+              recalled: m.recalled ?? false,
+              voiceUri: m.voice_uri ?? undefined,
+              voiceDurationSec: m.voice_duration_sec ?? undefined,
+              imageUri: m.photo_uri ?? undefined,
+              venueName: m.venue_name ?? undefined,
+              venueArea: m.venue_area ?? undefined,
+            }))
+            await saveGroupChatMessages(eventId, mapped)
+            setMessages(mapped)
+          }
+        }
+      } catch {
+        // fail silently
+      }
+    }
 
     const existingRaw = await AsyncStorage.getItem(GROUP_CHAT_CONVERSATIONS_KEY);
     const existingList = existingRaw ? JSON.parse(existingRaw) : [];
