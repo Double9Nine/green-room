@@ -672,11 +672,11 @@ export default function ChatConversationScreen() {
 
   const appendMessage = useCallback(
     (msg: Omit<ChatMessage, "id" | "createdAt">) => {
-      if (!msg.sent) {
+      if (!msg.sent && !isViewingRef.current) {
         void incrementUnreadPrivate();
-        if (isMatchChat) {
-          void handleReceivedMessage();
-        }
+      }
+      if (!msg.sent && isMatchChat) {
+        void handleReceivedMessage();
       }
       setMessages((prev) => {
         const next = [
@@ -734,6 +734,14 @@ export default function ChatConversationScreen() {
     appendMessageRef.current = appendMessage
   }, [appendMessage])
 
+  const isViewingRef = useRef(true)
+  useEffect(() => {
+    isViewingRef.current = true
+    return () => {
+      isViewingRef.current = false
+    }
+  }, [])
+
   // Realtime subscription for incoming messages
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null
@@ -768,6 +776,41 @@ export default function ChatConversationScreen() {
                 venueName: newMsg.venue_name ?? undefined,
                 venueArea: newMsg.venue_area ?? undefined,
               })
+
+              // Update conversation unread in AsyncStorage
+              void (async () => {
+                try {
+                  const raw = await AsyncStorage.getItem('conversations')
+                  const convos = raw ? JSON.parse(raw) : []
+                  const updated = convos.map((c: any) =>
+                    c.id === conversationId
+                      ? { ...c, unread: true, lastMessage: newMsg.text, lastMessageTime: newMsg.created_at }
+                      : c
+                  )
+                  await AsyncStorage.setItem('conversations', JSON.stringify(updated))
+                } catch {
+                  // fail silently
+                }
+              })()
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+            filter: `conversation_id=eq.${conversationId}`,
+          },
+          (payload) => {
+            const updatedMsg = payload.new as any
+            if (updatedMsg.recalled) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === updatedMsg.id ? { ...m, recalled: true } : m
+                )
+              )
             }
           }
         )
@@ -888,20 +931,22 @@ export default function ChatConversationScreen() {
   useEffect(() => {
     const loadMessages = async () => {
       const raw = await AsyncStorage.getItem(MESSAGES_KEY)
+      let localMessages: ChatMessage[] = []
+
       if (raw) {
         try {
           const saved = JSON.parse(raw) as ChatMessage[]
           if (Array.isArray(saved) && saved.length > 0) {
+            localMessages = saved
             setMessages(saved)
             setMessagesLoaded(true)
-            return
           }
         } catch {
           /* ignore malformed data */
         }
       }
 
-      // If no local messages, try Supabase
+      // Always fetch from Supabase to get latest recalled status
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
@@ -916,7 +961,7 @@ export default function ChatConversationScreen() {
               id: m.id,
               type: m.type ?? 'text',
               text: m.text ?? '',
-              sent: m.sent,
+              sent: m.user_id === user.id,
               createdAt: m.created_at,
               recalled: m.recalled ?? false,
               voiceUri: m.voice_uri ?? undefined,
@@ -930,7 +975,7 @@ export default function ChatConversationScreen() {
           }
         }
       } catch {
-        // fail silently
+        // fail silently - use local data
       }
 
       setMessagesLoaded(true)
@@ -1602,7 +1647,7 @@ export default function ChatConversationScreen() {
     [scrollToEnd, showToast]
   );
 
-  const handleSheetAction = (key: SheetAction["key"]) => {
+  const handleSheetAction = async (key: SheetAction["key"]) => {
     if (!actionSheetMessageId) return;
     const targetId = actionSheetMessageId;
 
@@ -1618,6 +1663,17 @@ export default function ChatConversationScreen() {
           return m;
         })
       );
+
+      // Sync recall to Supabase
+      try {
+        await supabase
+          .from('messages')
+          .update({ recalled: true })
+          .eq('id', targetId)
+      } catch {
+        // fail silently
+      }
+
       closeActionSheet();
     } else if (key === "delete") {
       closeActionSheet();
@@ -2161,7 +2217,7 @@ export default function ChatConversationScreen() {
                   styles.sheetOption,
                   index < sheetActions.length - 1 && styles.sheetOptionBorder,
                 ]}
-                onPress={() => handleSheetAction(action.key)}
+                onPress={() => void handleSheetAction(action.key)}
               >
                 <Text
                   style={[

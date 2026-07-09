@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Alert,
   Animated,
@@ -32,7 +32,9 @@ import {
   clearUnreadPrivate,
   getUnreadGroupCount,
   getUnreadPrivateCount,
+  incrementUnreadPrivate,
 } from "@/lib/notificationStore";
+import { supabase } from '@/lib/supabase';
 
 type ChatSubTab = "private" | "group";
 
@@ -273,6 +275,64 @@ export default function ChatScreen() {
   const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
   const subTabRef = useRef<ChatSubTab>("private");
   subTabRef.current = subTab;
+
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    const setupGlobalRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      channel = supabase
+        .channel('global-messages')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+          },
+          async (payload) => {
+            const newMsg = payload.new as any
+
+            // Check if this message belongs to current user's conversations
+            const convId = newMsg.conversation_id as string
+            if (!convId.includes(user.id)) return
+            if (newMsg.user_id === user.id) return
+
+            // Increment unread count
+            await incrementUnreadPrivate()
+
+            // Update conversation unread in AsyncStorage
+            try {
+              const raw = await AsyncStorage.getItem('conversations')
+              const convos = raw ? JSON.parse(raw) : []
+              const updated = convos.map((c: any) =>
+                c.id === convId
+                  ? {
+                      ...c,
+                      unread: true,
+                      lastMessage: newMsg.text ?? '',
+                      lastMessageTime: newMsg.created_at,
+                    }
+                  : c
+              )
+              await AsyncStorage.setItem('conversations', JSON.stringify(updated))
+              setConversations(updated)
+            } catch {
+              // fail silently
+            }
+          }
+        )
+        .subscribe()
+    }
+
+    void setupGlobalRealtime()
+
+    return () => {
+      if (channel) void supabase.removeChannel(channel)
+    }
+  }, [])
 
   const loadConversations = useCallback(async () => {
     const convos = await loadStoredConversations();
