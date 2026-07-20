@@ -13,6 +13,7 @@ export type StoredConversation = {
   lastMessage: string;
   lastMessageTime: number;
   unread: boolean;
+  unreadCount?: number;
   muted?: boolean;
   isOrganizerChat?: boolean;
   eventId?: string;

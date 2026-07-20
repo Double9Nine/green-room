@@ -55,7 +55,9 @@
       "@react-native-community/datetimepicker",
       "expo-image-picker",
       "expo-location",
-      "expo-av"
+      "expo-av",
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

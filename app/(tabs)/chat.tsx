@@ -32,9 +32,7 @@ import {
   clearUnreadPrivate,
   getUnreadGroupCount,
   getUnreadPrivateCount,
-  incrementUnreadPrivate,
 } from "@/lib/notificationStore";
-import { supabase } from '@/lib/supabase';
 
 type ChatSubTab = "private" | "group";
 
@@ -195,8 +193,36 @@ function ConversationRow({
             onPressOut={() => animateScale(1)}
             style={styles.cardPressable}
           >
-            <View style={styles.avatar}>
-              <Ionicons name="person" size={24} color={ACCENT_DARK} />
+            <View style={{ position: 'relative' }}>
+              <View style={styles.avatar}>
+                <Ionicons name="person" size={24} color={ACCENT_DARK} />
+              </View>
+              {showUnread && (
+                <View style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  backgroundColor: '#dc2626',
+                  borderRadius: 10,
+                  minWidth: 18,
+                  height: 18,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingHorizontal: 4,
+                  borderWidth: 1.5,
+                  borderColor: '#ffffff',
+                }}>
+                  <Text style={{
+                    color: '#ffffff',
+                    fontSize: 10,
+                    fontWeight: '700',
+                  }}>
+                    {convo.unreadCount && convo.unreadCount > 0
+                      ? convo.unreadCount > 99 ? '99+' : String(convo.unreadCount)
+                      : ''}
+                  </Text>
+                </View>
+              )}
             </View>
             <View style={styles.convoBody}>
               <View style={styles.convoTop}>
@@ -239,7 +265,6 @@ function ConversationRow({
                   <Text style={styles.convoTime}>
                     {formatConversationTime(convo.lastMessageTime)}
                   </Text>
-                  {showUnread ? <View style={styles.unreadDot} /> : null}
                 </View>
               </View>
               <Text style={styles.convoPreview} numberOfLines={1}>
@@ -275,64 +300,6 @@ export default function ChatScreen() {
   const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
   const subTabRef = useRef<ChatSubTab>("private");
   subTabRef.current = subTab;
-
-  useEffect(() => {
-    let channel: ReturnType<typeof supabase.channel> | null = null
-
-    const setupGlobalRealtime = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      channel = supabase
-        .channel('global-messages')
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'messages',
-          },
-          async (payload) => {
-            const newMsg = payload.new as any
-
-            // Check if this message belongs to current user's conversations
-            const convId = newMsg.conversation_id as string
-            if (!convId.includes(user.id)) return
-            if (newMsg.user_id === user.id) return
-
-            // Increment unread count
-            await incrementUnreadPrivate()
-
-            // Update conversation unread in AsyncStorage
-            try {
-              const raw = await AsyncStorage.getItem('conversations')
-              const convos = raw ? JSON.parse(raw) : []
-              const updated = convos.map((c: any) =>
-                c.id === convId
-                  ? {
-                      ...c,
-                      unread: true,
-                      lastMessage: newMsg.text ?? '',
-                      lastMessageTime: newMsg.created_at,
-                    }
-                  : c
-              )
-              await AsyncStorage.setItem('conversations', JSON.stringify(updated))
-              setConversations(updated)
-            } catch {
-              // fail silently
-            }
-          }
-        )
-        .subscribe()
-    }
-
-    void setupGlobalRealtime()
-
-    return () => {
-      if (channel) void supabase.removeChannel(channel)
-    }
-  }, [])
 
   const loadConversations = useCallback(async () => {
     const convos = await loadStoredConversations();
@@ -415,8 +382,26 @@ export default function ChatScreen() {
     });
   }, []);
 
-  const openConversation = (convo: StoredConversation) => {
+  const openConversation = async (convo: StoredConversation) => {
     closeAllSwipeables();
+
+    // Mark as read
+    if (convo.unread) {
+      setConversations((current) =>
+        current.map((c) => c.id === convo.id ? { ...c, unread: false, unreadCount: 0 } : c)
+      )
+      try {
+        const raw = await AsyncStorage.getItem('conversations')
+        const convos = raw ? JSON.parse(raw) : []
+        const updated = convos.map((c: any) =>
+          c.id === convo.id ? { ...c, unread: false, unreadCount: 0 } : c
+        )
+        await AsyncStorage.setItem('conversations', JSON.stringify(updated))
+      } catch {
+        // fail silently
+      }
+    }
+
     router.push({
       pathname: "/chat-conversation",
       params: {
@@ -671,7 +656,7 @@ export default function ChatScreen() {
                     }}
                     onSwipeableWillOpen={() => closeOtherSwipeables(convo.id)}
                     renderRightActions={renderRightActions(convo)}
-                    onPress={() => openConversation(convo)}
+                    onPress={() => void openConversation(convo)}
                   />
                 ))}
               </View>

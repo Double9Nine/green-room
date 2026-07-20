@@ -1,13 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Tabs, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
 
 import {
   getExploreBadgeCount,
   getUnreadGroupCount,
   getUnreadPrivateCount,
+  incrementUnreadPrivate,
 } from "@/lib/notificationStore";
+import { supabase } from "@/lib/supabase";
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -20,6 +23,66 @@ const ACCENT_DARK = "#15803d";
 export default function TabsLayout() {
   const [exploreBadge, setExploreBadge] = useState(0);
   const [chatBadge, setChatBadge] = useState(0);
+
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      channel = supabase
+        .channel('global-chat-badge')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+          },
+          async (payload) => {
+            const newMsg = payload.new as any
+            const convId = newMsg.conversation_id as string
+            if (!convId.includes(user.id)) return
+            if (newMsg.user_id === user.id) return
+
+            await incrementUnreadPrivate()
+            const [priv, grp] = await Promise.all([
+              getUnreadPrivateCount(),
+              getUnreadGroupCount(),
+            ])
+            setChatBadge(priv + grp)
+
+            // Update conversation unread in AsyncStorage
+            try {
+              const raw = await AsyncStorage.getItem('conversations')
+              const convos = raw ? JSON.parse(raw) : []
+              const updated = convos.map((c: any) =>
+                c.id === convId
+                  ? {
+                      ...c,
+                      unread: true,
+                      unreadCount: (c.unreadCount ?? 0) + 1,
+                      lastMessage: newMsg.text ?? '',
+                      lastMessageTime: newMsg.created_at,
+                    }
+                  : c
+              )
+              await AsyncStorage.setItem('conversations', JSON.stringify(updated))
+            } catch {
+              // fail silently
+            }
+          }
+        )
+        .subscribe()
+    }
+
+    void setupRealtime()
+
+    return () => {
+      if (channel) void supabase.removeChannel(channel)
+    }
+  }, [])
 
   useFocusEffect(
     useCallback(() => {
