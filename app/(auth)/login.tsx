@@ -123,6 +123,53 @@ export default function LoginScreen() {
           // fail silently - will use local data
         }
 
+        // Fetch group chat conversations from Supabase
+        try {
+          const { data: groupConvosData } = await supabase
+            .from('event_attendees')
+            .select(`
+              event_id,
+              events (
+                id,
+                title,
+                sport_emoji,
+                organizer_name
+              )
+            `)
+            .eq('user_id', data.user.id)
+
+          if (groupConvosData && groupConvosData.length > 0) {
+            const existingRaw = await AsyncStorage.getItem('groupChatConversations')
+            const existing = existingRaw ? JSON.parse(existingRaw) : []
+
+            const fromSupabase = groupConvosData
+              .filter((a: any) => a.events)
+              .map((a: any) => ({
+                eventId: String(a.event_id),
+                eventTitle: a.events.title ?? '',
+                sportEmoji: a.events.sport_emoji ?? '🎾',
+                organizer: a.events.organizer_name ?? '',
+                lastMessage: '',
+                lastMessageTime: Date.now(),
+                unread: false,
+                unreadCount: 0,
+              }))
+
+            // Merge with existing (keep local data if exists)
+            const merged = fromSupabase.map((s: any) => {
+              const local = existing.find((e: any) => e.eventId === s.eventId)
+              return local ? { ...s, ...local } : s
+            })
+
+            await AsyncStorage.setItem(
+              'groupChatConversations',
+              JSON.stringify(merged)
+            )
+          }
+        } catch {
+          // fail silently
+        }
+
         router.replace("/(tabs)/match")
       }
     } catch (err) {

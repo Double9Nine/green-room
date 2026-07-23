@@ -126,6 +126,7 @@ export default function EventGroupChatScreen() {
   const [confirmedMembers, setConfirmedMembers] = useState<ChatMember[]>([]);
   const [messages, setMessages] = useState<GroupChatMessage[]>([]);
   const [myProfile, setMyProfile] = useState<any>(null);
+  const [organizerUserId, setOrganizerUserId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
     name: "You",
     initial: "Y",
@@ -266,6 +267,20 @@ export default function EventGroupChatScreen() {
   const loadChatData = useCallback(async () => {
     const user = await getCurrentUser();
     setCurrentUser(user);
+
+    try {
+      const { data: eventData } = await supabase
+        .from('events')
+        .select('organizer_id')
+        .eq('id', eventId)
+        .single()
+
+      if (eventData) {
+        setOrganizerUserId(eventData.organizer_id)
+      }
+    } catch {
+      // fail silently
+    }
 
     const loadedMessages = await loadGroupChatMessages(eventId);
     const forViewer = applyMessagesForViewer(loadedMessages, user.name);
@@ -1359,7 +1374,7 @@ export default function EventGroupChatScreen() {
                           playerSkill: "",
                           playerLocation: "",
                           sportEmoji,
-                          playerId: `organizer-${eventId}`,
+                          playerId: organizerUserId ?? `organizer-${eventId}`,
                           isOrganizerChat: "true",
                           eventId: String(eventId),
                           fromGroupChat: "true",
