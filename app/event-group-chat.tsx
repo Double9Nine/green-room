@@ -339,12 +339,78 @@ export default function EventGroupChatScreen() {
     });
   }, []);
 
+  useEffect(() => {
+    if (!eventId) return
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      channel = supabase
+        .channel(`group-messages:${eventId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'group_messages',
+            filter: `event_id=eq.${eventId}`,
+          },
+          (payload) => {
+            const newMsg = payload.new as any
+            if (newMsg.user_id === user.id) return
+            appendMessageRef.current({
+              type: newMsg.type ?? 'text',
+              text: newMsg.text ?? '',
+              sent: false,
+              sender: newMsg.sender_name ?? '',
+              initial: newMsg.sender_initial ?? '',
+              createdAt: newMsg.created_at,
+              recalled: newMsg.recalled ?? false,
+              voiceUri: newMsg.voice_uri ?? undefined,
+              voiceDurationSec: newMsg.voice_duration_sec ?? undefined,
+              imageUri: newMsg.photo_uri ?? undefined,
+              venueName: newMsg.venue_name ?? undefined,
+              venueArea: newMsg.venue_area ?? undefined,
+            })
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'group_messages',
+            filter: `event_id=eq.${eventId}`,
+          },
+          (payload) => {
+            const updatedMsg = payload.new as any
+            if (updatedMsg.recalled) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === updatedMsg.id ? { ...m, recalled: true } : m
+                )
+              )
+            }
+          }
+        )
+        .subscribe()
+    }
+
+    void setupRealtime()
+
+    return () => {
+      if (channel) void supabase.removeChannel(channel)
+    }
+  }, [eventId])
+
   const appendMessage = useCallback(
     (
       partial: Omit<
         GroupChatMessage,
         "id" | "sender" | "initial" | "sent" | "time" | "createdAt"
-      > & { sent?: boolean }
+      > & { sent?: boolean; sender?: string; initial?: string; createdAt?: number }
     ) => {
       const user = currentUser;
       const isSent = partial.sent ?? true;
@@ -354,11 +420,11 @@ export default function EventGroupChatScreen() {
       const newMsg = normalizeGroupChatMessage({
         ...partial,
         id: `msg-${Date.now()}-${Math.random()}`,
-        sender: user.name,
-        initial: user.initial,
+        sender: isSent ? user.name : (partial.sender ?? user.name),
+        initial: isSent ? user.initial : (partial.initial ?? user.initial),
         sent: isSent,
         time: formatMessageTime(new Date()),
-        createdAt: Date.now(),
+        createdAt: partial.createdAt ?? Date.now(),
       });
 
       setMessages((prev) => {
@@ -377,6 +443,11 @@ export default function EventGroupChatScreen() {
     },
     [currentUser, persistMessages, scrollToEnd]
   );
+
+  const appendMessageRef = useRef(appendMessage)
+  useEffect(() => {
+    appendMessageRef.current = appendMessage
+  }, [appendMessage])
 
   const sendTextMessage = useCallback(() => {
     const text = inputText.trim();

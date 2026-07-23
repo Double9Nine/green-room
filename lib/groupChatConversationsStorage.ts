@@ -9,6 +9,8 @@ export type StoredGroupChatConversation = {
   organizer?: string;
   lastMessage: string;
   lastMessageTime: number;
+  unread?: boolean;
+  unreadCount?: number;
 };
 
 export async function loadGroupChatConversations(): Promise<

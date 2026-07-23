@@ -8,6 +8,7 @@ import {
   getExploreBadgeCount,
   getUnreadGroupCount,
   getUnreadPrivateCount,
+  incrementUnreadGroup,
   incrementUnreadPrivate,
 } from "@/lib/notificationStore";
 import { supabase } from "@/lib/supabase";
@@ -26,6 +27,7 @@ export default function TabsLayout() {
 
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null
+    let groupChannel: ReturnType<typeof supabase.channel> | null = null
 
     const setupRealtime = async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -75,12 +77,57 @@ export default function TabsLayout() {
           }
         )
         .subscribe()
+
+      groupChannel = supabase
+        .channel('global-group-chat-badge')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'group_messages',
+          },
+          async (payload) => {
+            const newMsg = payload.new as any
+            const { data: { user: currentUser } } = await supabase.auth.getUser()
+            if (!currentUser) return
+            if (newMsg.user_id === currentUser.id) return
+
+            await incrementUnreadGroup()
+            const [priv, grp] = await Promise.all([
+              getUnreadPrivateCount(),
+              getUnreadGroupCount(),
+            ])
+            setChatBadge(priv + grp)
+
+            try {
+              const raw = await AsyncStorage.getItem('groupChatConversations')
+              const convos = raw ? JSON.parse(raw) : []
+              const updated = convos.map((c: any) =>
+                c.eventId === newMsg.event_id
+                  ? {
+                      ...c,
+                      unread: true,
+                      unreadCount: (c.unreadCount ?? 0) + 1,
+                      lastMessage: newMsg.text ?? '',
+                      lastMessageTime: newMsg.created_at,
+                    }
+                  : c
+              )
+              await AsyncStorage.setItem('groupChatConversations', JSON.stringify(updated))
+            } catch {
+              // fail silently
+            }
+          }
+        )
+        .subscribe()
     }
 
     void setupRealtime()
 
     return () => {
       if (channel) void supabase.removeChannel(channel)
+      if (groupChannel) void supabase.removeChannel(groupChannel)
     }
   }, [])
 

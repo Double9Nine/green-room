@@ -116,8 +116,36 @@ function GroupChatRow({
             onPressOut={() => animateScale(1)}
             style={styles.cardPressable}
           >
-            <View style={styles.groupChatAvatar}>
-              <Text style={styles.groupChatAvatarEmoji}>{convo.sportEmoji}</Text>
+            <View style={{ position: 'relative' }}>
+              <View style={styles.groupChatAvatar}>
+                <Text style={styles.groupChatAvatarEmoji}>{convo.sportEmoji}</Text>
+              </View>
+              {convo.unread ? (
+                <View style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  backgroundColor: '#dc2626',
+                  borderRadius: 10,
+                  minWidth: 18,
+                  height: 18,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingHorizontal: 4,
+                  borderWidth: 1.5,
+                  borderColor: '#ffffff',
+                }}>
+                  <Text style={{
+                    color: '#ffffff',
+                    fontSize: 10,
+                    fontWeight: '700',
+                  }}>
+                    {convo.unreadCount && convo.unreadCount > 0
+                      ? convo.unreadCount > 99 ? '99+' : String(convo.unreadCount)
+                      : ''}
+                  </Text>
+                </View>
+              ) : null}
             </View>
             <View style={styles.convoBody}>
               <View style={styles.convoTop}>
@@ -304,11 +332,21 @@ export default function ChatScreen() {
   const loadConversations = useCallback(async () => {
     const convos = await loadStoredConversations();
     setConversations(convos);
+    // Clear stale private unread count if no conversations are actually unread
+    const hasUnread = convos.some((c) => c.unread);
+    if (!hasUnread) {
+      await clearUnreadPrivate();
+    }
   }, []);
 
   const loadGroupChats = useCallback(async () => {
     const groups = await loadGroupChatConversations();
     setGroupChats(groups);
+    // Clear stale group unread count if no group chats are actually unread
+    const hasGroupUnread = groups.some((c) => c.unread);
+    if (!hasGroupUnread) {
+      await clearUnreadGroup();
+    }
   }, []);
 
   const refreshBadges = useCallback(async () => {
@@ -418,8 +456,31 @@ export default function ChatScreen() {
     });
   };
 
-  const openGroupChat = (convo: StoredGroupChatConversation) => {
+  const openGroupChat = async (convo: StoredGroupChatConversation) => {
     closeAllSwipeables();
+
+    if (convo.unread) {
+      setGroupChats((current) =>
+        current.map((c) =>
+          c.eventId === convo.eventId
+            ? { ...c, unread: false, unreadCount: 0 }
+            : c
+        )
+      );
+      try {
+        const raw = await AsyncStorage.getItem('groupChatConversations')
+        const convos = raw ? JSON.parse(raw) : []
+        const updated = convos.map((c: any) =>
+          c.eventId === convo.eventId
+            ? { ...c, unread: false, unreadCount: 0 }
+            : c
+        )
+        await AsyncStorage.setItem('groupChatConversations', JSON.stringify(updated))
+      } catch {
+        // fail silently
+      }
+    }
+
     router.push({
       pathname: "/event-group-chat",
       params: {
@@ -690,7 +751,7 @@ export default function ChatScreen() {
                     closeOtherSwipeables(`group-${convo.eventId}`)
                   }
                   renderRightActions={renderGroupChatRightActions(convo.eventId)}
-                  onPress={() => openGroupChat(convo)}
+                  onPress={() => void openGroupChat(convo)}
                 />
               ))}
             </View>
