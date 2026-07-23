@@ -1579,9 +1579,24 @@ export default function ExploreScreen() {
       });
 
       const loadBadges = async () => {
-        const pending = await getPendingRequestsCount();
+        const allRequests = await loadEventRequests()
+        const myEventsRaw = await AsyncStorage.getItem('myEvents')
+        const myEvts = myEventsRaw ? JSON.parse(myEventsRaw) : []
+        const myEventIds = myEvts.map((e: any) => e.id)
+
+        const pendingCount = allRequests.filter(
+          (r) => r.status === 'pending'
+            && r.userId !== CURRENT_USER_ID
+            && myEventIds.includes(r.eventId)
+            && myEvts.find((e: any) => e.id === r.eventId)?.status !== 'past'
+        ).length
+
+        await AsyncStorage.setItem(
+          'notif_pending_requests',
+          JSON.stringify(pendingCount)
+        )
         const status = await getJoinedStatusChangesCount();
-        setMyEventsBadge(pending);
+        setMyEventsBadge(pendingCount);
         setJoinedBadge(status);
       };
       void loadBadges();
@@ -1606,10 +1621,7 @@ export default function ExploreScreen() {
 
   const switchSubTab = useCallback((tab: SubTab) => {
     setSubTab(tab);
-    if (tab === "my") {
-      void clearPendingRequests();
-      setMyEventsBadge(0);
-    } else if (tab === "joined") {
+    if (tab === "joined") {
       void clearJoinedStatusChanges();
       setJoinedBadge(0);
     }
@@ -2245,6 +2257,22 @@ export default function ExploreScreen() {
     await approveJoinRequest(eventId, userId);
     await refreshRequestData();
 
+    const pending = await loadEventRequests();
+    const myEventsRaw = await AsyncStorage.getItem('myEvents')
+    const myEvts = myEventsRaw ? JSON.parse(myEventsRaw) : []
+    const myEvtIds = myEvts.map((e: any) => e.id)
+    const pendingCount = pending.filter(
+      (r) => r.status === 'pending'
+        && r.userId !== CURRENT_USER_ID
+        && myEvtIds.includes(r.eventId)
+        && myEvts.find((e: any) => e.id === r.eventId)?.status !== 'past'
+    ).length;
+    await AsyncStorage.setItem(
+      'notif_pending_requests',
+      JSON.stringify(pendingCount)
+    );
+    setMyEventsBadge(pendingCount);
+
     const source =
       allDiscoverEvents.find((e) => e.id === eventId) ??
       requestsModalEvent ??
@@ -2276,6 +2304,22 @@ export default function ExploreScreen() {
   const handleDeclineRequest = async (eventId: number, userId: string) => {
     await declineJoinRequest(eventId, userId);
     await refreshRequestData();
+
+    const pending = await loadEventRequests();
+    const myEventsRaw = await AsyncStorage.getItem('myEvents')
+    const myEvts = myEventsRaw ? JSON.parse(myEventsRaw) : []
+    const myEvtIds = myEvts.map((e: any) => e.id)
+    const pendingCount = pending.filter(
+      (r) => r.status === 'pending'
+        && r.userId !== CURRENT_USER_ID
+        && myEvtIds.includes(r.eventId)
+        && myEvts.find((e: any) => e.id === r.eventId)?.status !== 'past'
+    ).length;
+    await AsyncStorage.setItem(
+      'notif_pending_requests',
+      JSON.stringify(pendingCount)
+    );
+    setMyEventsBadge(pendingCount);
   };
 
   const modalPendingRequests = requestsModalEvent

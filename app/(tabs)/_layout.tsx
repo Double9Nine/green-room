@@ -5,13 +5,15 @@ import { useCallback, useEffect, useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
 
 import {
-  getExploreBadgeCount,
+  getJoinedStatusChangesCount,
   getUnreadGroupCount,
   getUnreadPrivateCount,
   incrementUnreadGroup,
   incrementUnreadPrivate,
 } from "@/lib/notificationStore";
 import { supabase } from "@/lib/supabase";
+import { loadEventRequests } from "@/lib/eventRequestStorage";
+import { CURRENT_USER_ID } from "@/lib/getCurrentUser";
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -134,7 +136,23 @@ export default function TabsLayout() {
   useFocusEffect(
     useCallback(() => {
       const loadBadges = async () => {
-        const explore = await getExploreBadgeCount();
+        const allRequests = await loadEventRequests()
+
+        // Get my events to filter out stale requests
+        const myEventsRaw = await AsyncStorage.getItem('myEvents')
+        const myEvents = myEventsRaw ? JSON.parse(myEventsRaw) : []
+        const myEventIds = myEvents.map((e: any) => e.id)
+
+        const pendingCount = allRequests.filter(
+          (r) => r.status === 'pending'
+            && r.userId !== CURRENT_USER_ID
+            && myEventIds.includes(r.eventId)
+            && myEvents.find((e: any) => e.id === r.eventId)?.status !== 'past'
+        ).length
+
+        const status = await getJoinedStatusChangesCount();
+        const explore = pendingCount + status;
+
         const [priv, grp] = await Promise.all([
           getUnreadPrivateCount(),
           getUnreadGroupCount(),
