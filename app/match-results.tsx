@@ -22,6 +22,7 @@ import {
     type MatchPlayer,
 } from "@/constants/matchPlayers";
 import { getMatchSport } from "@/constants/matchSports";
+import { scoreCandidate, type MatchFilters } from '@/lib/matchScoring';
 import { supabase } from '@/lib/supabase';
 
 const { width, height } = Dimensions.get("window");
@@ -460,6 +461,14 @@ export default function MatchResultsScreen() {
   const params = useLocalSearchParams<{
     sport?: string;
     sportLabel?: string;
+    sportScene?: string;
+    skillLevels?: string;
+    availability?: string;
+    ageRange?: string;
+    genderPreference?: string;
+    purpose?: string;
+    userLat?: string;
+    userLng?: string;
   }>();
 
   const [players, setPlayers] = useState<Player[]>([]);
@@ -471,68 +480,154 @@ export default function MatchResultsScreen() {
 
   useEffect(() => {
     const loadAndFilter = async () => {
-      const raw = await AsyncStorage.getItem(SKIPPED_KEY);
-      const skipped = raw ? JSON.parse(raw) : {};
+      const raw = await AsyncStorage.getItem(SKIPPED_KEY)
+      const skipped = raw ? JSON.parse(raw) : {}
+      const messagedRaw = await AsyncStorage.getItem(MESSAGED_KEY)
+      const messaged = messagedRaw ? JSON.parse(messagedRaw) : {}
+      const expiredRaw = await AsyncStorage.getItem(EXPIRED_KEY)
+      const expired = expiredRaw ? JSON.parse(expiredRaw) : {}
+      const now = Date.now()
+      const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
 
-      const messagedRaw = await AsyncStorage.getItem(MESSAGED_KEY);
-      const messaged = messagedRaw ? JSON.parse(messagedRaw) : {};
+      // Parse filter params
+      const sportId = typeof params.sport === 'string' ? params.sport : 'tennis'
+      const skillLevels: string[] = params.skillLevels ? JSON.parse(params.skillLevels) : []
+      const availability: string[] = params.availability ? JSON.parse(params.availability) : []
+      const ageRangeArr: string[] = params.ageRange ? JSON.parse(params.ageRange) : ['18-99']
+      const genderPreference: string[] = params.genderPreference ? JSON.parse(params.genderPreference) : []
+      const purposeArr: string[] = params.purpose ? JSON.parse(params.purpose) : []
+      const userLat = params.userLat ? parseFloat(params.userLat) : null
+      const userLng = params.userLng ? parseFloat(params.userLng) : null
+      const maxDistance = 25
 
-      const expiredRaw = await AsyncStorage.getItem(EXPIRED_KEY);
-      const expired = expiredRaw ? JSON.parse(expiredRaw) : {};
+      // Parse age range
+      const ageRangeParts = (ageRangeArr[0] ?? '18-99').split('-').map(Number)
+      const minAge = ageRangeParts[0] ?? 18
+      const maxAge = ageRangeParts[1] ?? 99
 
-      const now = Date.now();
+      // Get user profile for tags
+      const profileRaw = await AsyncStorage.getItem('userProfile')
+      const userProfile = profileRaw ? JSON.parse(profileRaw) : {}
+      const userTags: string[] = userProfile.tags ?? []
+      const userSkillLevel: string = userProfile.skillLevel ?? ''
+
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+
+        if (user) {
+          // Fetch real users from Supabase
+          const { data: candidates } = await supabase
+            .from('profiles')
+            .select('*')
+            .neq('id', user.id)
+            .eq('sport', sportId)
+
+          if (candidates && candidates.length > 0) {
+            const filters: MatchFilters = {
+              sport: sportId,
+              skillLevelPreference: skillLevels[0] ?? 'Any level',
+              userSkillLevel,
+              availability,
+              genderPreference,
+              purpose: purposeArr,
+              userTags,
+              userLat,
+              userLng,
+              maxDistance,
+            }
+
+            const scored: Player[] = []
+
+            for (const candidate of candidates) {
+              // Skip if recently messaged (unless expired)
+              if (messaged[candidate.id]) {
+                const expiredAt = expired[candidate.id]
+                if (!expiredAt) continue
+                if (now - expiredAt < THREE_DAYS_MS) continue
+              }
+
+              // Skip if recently skipped
+              const skippedAt = skipped[candidate.id]
+              if (skippedAt && now - skippedAt <= THREE_DAYS_MS) continue
+
+              // Age filter
+              const candidateAge = candidate.age ?? 25
+              if (candidateAge < minAge || candidateAge > maxAge) continue
+
+              // Score the candidate
+              const result = scoreCandidate(candidate, filters)
+              if (!result) continue
+              if (result.score < 50) continue
+
+              scored.push({
+                id: candidate.id,
+                name: candidate.name ?? 'Player',
+                age: candidateAge,
+                location: candidate.location ?? '',
+                skill: candidate.skill_level ?? '',
+                availability: (candidate.availability ?? []).join(', '),
+                purpose: candidate.purpose ?? '',
+                tags: candidate.tags ?? [],
+                photo: candidate.photo_url ?? null,
+                gamesPlayed: candidate.games_played ?? 0,
+                matchScore: result.score,
+                matchReasons: result.reasons,
+              })
+            }
+
+            scored.sort((a, b) => b.matchScore - a.matchScore)
+
+            if (scored.length > 0) {
+              setPlayers(scored)
+              return
+            }
+          }
+        }
+      } catch (err) {
+        console.log('Supabase match error:', err)
+      }
+
+      // Fallback to dummy players
       const validSkipped = Object.fromEntries(
         Object.entries(skipped).filter(
           ([, time]) => now - (time as number) <= THREE_DAYS_MS
         )
-      );
-      await AsyncStorage.setItem(SKIPPED_KEY, JSON.stringify(validSkipped));
+      )
+      await AsyncStorage.setItem(SKIPPED_KEY, JSON.stringify(validSkipped))
 
-      const sportId =
-        typeof params.sport === "string" ? params.sport : "tennis";
-      const sortedPlayers = getSortedPlayersForSport(sportId);
-
-      let updatedMessaged = { ...messaged };
-      let messagedChanged = false;
-      const filtered: Player[] = [];
+      const sortedPlayers = getSortedPlayersForSport(sportId)
+      let updatedMessaged = { ...messaged }
+      let messagedChanged = false
+      const filtered: Player[] = []
 
       for (const player of sortedPlayers) {
-        const skippedAt = validSkipped[player.id];
-        if (skippedAt) continue;
-
+        const skippedAt = validSkipped[player.id]
+        if (skippedAt) continue
         if (messaged[player.id]) {
-          const expiredAt = expired[player.id];
-          if (!expiredAt) continue;
-          if (Date.now() - expiredAt < THREE_DAYS_MS) continue;
-
-          delete updatedMessaged[player.id];
-          messagedChanged = true;
-
-          await AsyncStorage.removeItem(`matchLimit_${player.name}`);
-
-          const expiredRaw = await AsyncStorage.getItem(EXPIRED_KEY);
-          const expiredData = expiredRaw ? JSON.parse(expiredRaw) : {};
-          delete expiredData[player.id];
-          await AsyncStorage.setItem(EXPIRED_KEY, JSON.stringify(expiredData));
-
-          filtered.push(player);
-          continue;
+          const expiredAt = expired[player.id]
+          if (!expiredAt) continue
+          if (Date.now() - expiredAt < THREE_DAYS_MS) continue
+          delete updatedMessaged[player.id]
+          messagedChanged = true
+          await AsyncStorage.removeItem(`matchLimit_${player.name}`)
+          const expiredRaw2 = await AsyncStorage.getItem(EXPIRED_KEY)
+          const expiredData = expiredRaw2 ? JSON.parse(expiredRaw2) : {}
+          delete expiredData[player.id]
+          await AsyncStorage.setItem(EXPIRED_KEY, JSON.stringify(expiredData))
+          filtered.push(player)
+          continue
         }
-
-        filtered.push(player);
+        filtered.push(player)
       }
 
       if (messagedChanged) {
-        await AsyncStorage.setItem(
-          MESSAGED_KEY,
-          JSON.stringify(updatedMessaged)
-        );
+        await AsyncStorage.setItem(MESSAGED_KEY, JSON.stringify(updatedMessaged))
       }
 
-      setPlayers(filtered);
-    };
-    void loadAndFilter();
-  }, [params.sport]);
+      setPlayers(filtered)
+    }
+    void loadAndFilter()
+  }, [params.sport, params.skillLevels, params.availability, params.ageRange, params.genderPreference, params.purpose, params.userLat, params.userLng])
 
   useEffect(() => {
     const saveSession = async () => {
@@ -583,7 +678,7 @@ export default function MatchResultsScreen() {
 
   const selectedSportEmoji = sportDisplay.emoji;
 
-  const saveMessaged = async (playerId: number) => {
+  const saveMessaged = async (playerId: number | string) => {
     const { data: { user } } = await supabase.auth.getUser()
 
     // Always save to AsyncStorage for local UI
@@ -642,7 +737,7 @@ export default function MatchResultsScreen() {
     [scrollX, handleScroll]
   );
 
-  const handleSkip = async (playerId: number) => {
+  const handleSkip = async (playerId: number | string) => {
     const raw = await AsyncStorage.getItem(SKIPPED_KEY);
     const skipped = raw ? JSON.parse(raw) : {};
 

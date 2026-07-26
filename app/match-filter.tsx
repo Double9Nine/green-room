@@ -312,10 +312,6 @@ export default function MatchFilterScreen() {
     ]
   );
 
-  useEffect(() => {
-    console.log("[match-filter] allFilled", allFilled);
-  }, [allFilled]);
-
   const toggleCell = (day: number, time: number) => {
     const key = `${day}-${time}`;
     setAvailability((prev) => {
