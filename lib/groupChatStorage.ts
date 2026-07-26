@@ -20,6 +20,7 @@ export type GroupChatMessage = {
   type: GroupChatMessageType;
   text?: string;
   recalled?: boolean;
+  userId?: string;
   imageUri?: string;
   locationLabel?: string;
   voiceUri?: string;
@@ -67,6 +68,7 @@ export function normalizeGroupChatMessage(
     type,
     text: raw.text,
     recalled: raw.recalled,
+    userId: raw.userId,
     imageUri: raw.imageUri,
     locationLabel: raw.locationLabel,
     voiceUri: raw.voiceUri,

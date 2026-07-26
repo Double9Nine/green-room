@@ -82,6 +82,7 @@ export default function LoginScreen() {
                 gameReminders: true,
               },
               gamesPlayed: profileData.games_played ?? 0,
+              gender: profileData.gender ?? '',
             })
           }
         } catch {

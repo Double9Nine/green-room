@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { supabase } from "@/lib/supabase";
 import { useEffect, useMemo, useState } from "react";
 import {
   Image,
@@ -72,6 +73,7 @@ export default function PlayerProfileScreen() {
 
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [gamesPlayed, setGamesPlayed] = useState(0);
+  const [playerGender, setPlayerGender] = useState<string | null>(null);
 
   const playerName = params.playerName ?? "Player";
 
@@ -86,6 +88,31 @@ export default function PlayerProfileScreen() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const fetchFromSupabase = async () => {
+      // Only fetch if playerId looks like a real UUID
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(playerId)
+      if (!isUUID) return
+
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('gender, games_played')
+          .eq('id', playerId)
+          .single()
+
+        if (data) {
+          if (data.gender) setPlayerGender(data.gender)
+          if (data.games_played) setGamesPlayed(data.games_played)
+        }
+      } catch {
+        // fail silently
+      }
+    }
+    void fetchFromSupabase()
+  }, [playerId])
+
   const playerPhoto = params.playerPhoto?.trim() || null;
   const hideLocation = params.hideLocation === "true";
   const hideAvailability = params.hideAvailability === "true";
@@ -186,6 +213,14 @@ export default function PlayerProfileScreen() {
 
           {displayAge ? (
             <Text style={styles.age}>Age {displayAge}</Text>
+          ) : null}
+
+          {playerGender ? (
+            <Text style={{ fontSize: 14, color: '#64748b', marginTop: 4 }}>
+              {playerGender === 'Male' ? '♂ Male' :
+               playerGender === 'Female' ? '♀ Female' :
+               playerGender}
+            </Text>
           ) : null}
 
           {displayPurpose ? (

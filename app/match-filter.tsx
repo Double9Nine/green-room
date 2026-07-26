@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import { Picker } from "@react-native-picker/picker";
+import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -23,6 +24,7 @@ import {
   SPORTS,
 } from "@/constants/skillLevels";
 import { mergeUserProfile } from "@/lib/profileStorage";
+import { supabase } from "@/lib/supabase";
 
 const BG = "#f0fdf4";
 const WHITE = "#ffffff";
@@ -260,6 +262,35 @@ export default function MatchFilterScreen() {
   const [availability, setAvailability] = useState<Set<string>>(new Set());
   const [gender, setGender] = useState<string>(GENDER_OPTIONS[0]);
   const [purpose, setPurpose] = useState<string>(PURPOSE_OPTIONS[0]);
+  const [userLat, setUserLat] = useState<number | null>(null)
+  const [userLng, setUserLng] = useState<number | null>(null)
+
+  useEffect(() => {
+    const getLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync()
+        if (status !== 'granted') return
+
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        })
+        setUserLat(loc.coords.latitude)
+        setUserLng(loc.coords.longitude)
+
+        // Also update profiles table with latest location
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          await supabase.from('profiles').update({
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
+          }).eq('id', user.id)
+        }
+      } catch {
+        // fail silently - location is optional
+      }
+    }
+    void getLocation()
+  }, [])
 
   const allFilled = useMemo(
     () =>
@@ -327,6 +358,8 @@ export default function MatchFilterScreen() {
         ageRange: JSON.stringify([`${minAge}-${maxAge}`]),
         genderPreference: JSON.stringify(gender ? [gender] : []),
         purpose: JSON.stringify(purpose ? [purpose] : []),
+        userLat: userLat ? String(userLat) : "",
+        userLng: userLng ? String(userLng) : "",
       },
     });
   }, [

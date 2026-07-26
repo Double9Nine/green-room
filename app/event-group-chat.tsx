@@ -311,6 +311,7 @@ export default function EventGroupChatScreen() {
               type: m.type ?? 'text',
               text: m.text ?? undefined,
               recalled: m.recalled ?? false,
+              userId: m.user_id ?? undefined,
               voiceUri: m.voice_uri ?? undefined,
               voiceDurationSec: m.voice_duration_sec ?? undefined,
               imageUri: m.photo_uri ?? undefined,
@@ -384,6 +385,7 @@ export default function EventGroupChatScreen() {
               sent: false,
               sender: newMsg.sender_name ?? '',
               initial: newMsg.sender_initial ?? '',
+              userId: newMsg.user_id ?? '',
               createdAt: newMsg.created_at,
               recalled: newMsg.recalled ?? false,
               voiceUri: newMsg.voice_uri ?? undefined,
@@ -1143,6 +1145,7 @@ export default function EventGroupChatScreen() {
                           router.push({
                             pathname: "/player-profile",
                             params: {
+                              playerId: msg.userId ?? "",
                               playerName: msg.sender ?? "Member",
                               playerSkill: "",
                               sportEmoji,

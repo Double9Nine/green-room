@@ -41,6 +41,7 @@ export default function AdditionalInfoScreen() {
         purpose: profile.purpose,
         tags: profile.tags,
         games_played: profile.gamesPlayed ?? 0,
+        gender: profile.gender ?? null,
         updated_at: new Date().toISOString(),
       })
     } catch (_err) {

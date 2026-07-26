@@ -259,6 +259,7 @@ export default function ProfileScreen() {
           availability: next.availability,
           purpose: next.purpose,
           tags: next.tags,
+          gender: next.gender ?? null,
           updated_at: new Date().toISOString(),
         }).eq('id', user.id)
       }
@@ -496,6 +497,17 @@ export default function ProfileScreen() {
             </View>
 
             <Text style={styles.heroMeta}>{heroMeta}</Text>
+            {profile.gender ? (
+              <Text style={{
+                fontSize: 13,
+                color: '#64748b',
+                marginTop: 2,
+              }}>
+                {profile.gender === 'Male' ? '♂ Male' :
+                 profile.gender === 'Female' ? '♀ Female' :
+                 profile.gender}
+              </Text>
+            ) : null}
 
             {profile.purpose ? (
               <View style={styles.purposePill}>

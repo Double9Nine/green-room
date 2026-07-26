@@ -32,7 +32,11 @@ export default function MyProfileScreen() {
 
   useEffect(() => {
     AsyncStorage.getItem(USER_PROFILE_KEY).then((raw) => {
-      if (raw) setProfile(JSON.parse(raw));
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        console.log('my-profile gender:', parsed.gender)
+        setProfile(parsed)
+      }
     });
   }, []);
 
@@ -85,6 +89,18 @@ export default function MyProfileScreen() {
             {profile?.skillLevel ? (
               <Text style={styles.sportSkill}>
                 {sport.emoji} {profile.skillLevel}
+              </Text>
+            ) : null}
+
+            {profile?.gender ? (
+              <Text style={{
+                fontSize: 13,
+                color: '#64748b',
+                marginTop: 2,
+              }}>
+                {profile.gender === 'Male' ? '♂ Male' :
+                 profile.gender === 'Female' ? '♀ Female' :
+                 profile.gender}
               </Text>
             ) : null}
 

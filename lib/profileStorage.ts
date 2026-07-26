@@ -21,6 +21,7 @@ export type UserProfile = {
   tags: string[];
   notifications: ProfileNotifications;
   gamesPlayed?: number;
+  gender?: string;
 };
 
 export const DEFAULT_USER_PROFILE: UserProfile = {
@@ -40,6 +41,7 @@ export const DEFAULT_USER_PROFILE: UserProfile = {
     gameReminders: true,
   },
   gamesPlayed: 0,
+  gender: "",
 };
 
 function migrateLegacy(raw: Record<string, unknown>): Partial<UserProfile> {
@@ -90,6 +92,8 @@ function migrateLegacy(raw: Record<string, unknown>): Partial<UserProfile> {
       : undefined,
     gamesPlayed:
       typeof raw.gamesPlayed === "number" ? raw.gamesPlayed : undefined,
+    gender:
+      typeof raw.gender === "string" && raw.gender ? raw.gender : undefined,
   };
 }
 

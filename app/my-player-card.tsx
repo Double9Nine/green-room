@@ -321,6 +321,13 @@ function AllStarCard({ profile }: { profile: UserProfile }) {
               <View style={styles.statsSection}>
                 <StatRow icon="🎯" label="Skill" value={skillText} />
                 <StatRow icon="📅" label="Avail" value={availabilityText} />
+                {profile.gender ? (
+                  <StatRow
+                    icon="👤"
+                    label="Gender"
+                    value={profile.gender}
+                  />
+                ) : null}
 
                 <View style={styles.profileFieldsSection}>
                   <Text style={styles.fieldHeading}>Purpose</Text>
