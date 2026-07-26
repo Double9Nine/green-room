@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -125,6 +126,8 @@ export default function EventGroupChatScreen() {
 
   const [confirmedMembers, setConfirmedMembers] = useState<ChatMember[]>([]);
   const [messages, setMessages] = useState<GroupChatMessage[]>([]);
+  const messagesRef = useRef<GroupChatMessage[]>([]);
+  messagesRef.current = messages;
   const [myProfile, setMyProfile] = useState<any>(null);
   const [organizerUserId, setOrganizerUserId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser>({
@@ -473,10 +476,67 @@ export default function EventGroupChatScreen() {
   }, [appendMessage, eventId, inputText]);
 
   const sendPhoto = useCallback(
-    (uri: string) => {
-      appendMessage({ type: "photo", imageUri: uri });
+    async (uri: string) => {
+      // Show local image immediately
+      appendMessage({ type: "photo", imageUri: uri })
+
+      // Upload to Supabase Storage in background
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const filename = `${user.id}_${Date.now()}.jpg`
+        const path = `group/${eventId}/${filename}`
+
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: 'base64',
+        })
+
+        const byteArray = Uint8Array.from(
+          atob(base64).split('').map(c => c.charCodeAt(0))
+        )
+
+        const { error } = await supabase.storage
+          .from('chat-images')
+          .upload(path, byteArray, {
+            contentType: 'image/jpeg',
+            upsert: false,
+          })
+
+        if (error) return
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('chat-images')
+          .getPublicUrl(path)
+
+        // Update message with public URL
+        setMessages(prev => {
+          const updated = prev.map(m =>
+            m.imageUri === uri
+              ? { ...m, imageUri: publicUrl }
+              : m
+          )
+          void saveGroupChatMessages(eventId, updated)
+          return updated
+        })
+
+        // Update in Supabase group_messages
+        try {
+          const uploadedMsg = messagesRef.current.find(m => m.imageUri === uri)
+          if (uploadedMsg) {
+            await supabase.from('group_messages').update({
+              photo_uri: publicUrl
+            }).eq('id', uploadedMsg.id)
+          }
+        } catch {
+          // fail silently
+        }
+
+      } catch {
+        // fail silently - local image already shown
+      }
     },
-    [appendMessage]
+    [appendMessage, eventId]
   );
 
   const shareVenueInChat = useCallback(
@@ -507,11 +567,12 @@ export default function EventGroupChatScreen() {
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.85,
+        mediaTypes: ['images'] as any,
+        allowsEditing: true,
+        quality: 0.8,
       });
-      if (!result.canceled && result.assets[0]?.uri) {
-        sendPhoto(result.assets[0].uri);
+      if (!result.canceled) {
+        void sendPhoto(result.assets[0].uri);
       }
     } catch {
       Alert.alert("", "Could not open the camera.");
@@ -529,11 +590,15 @@ export default function EventGroupChatScreen() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.85,
+        mediaTypes: ['images'] as any,
+        allowsMultipleSelection: true,
+        selectionLimit: 10,
+        quality: 0.8,
       });
-      if (!result.canceled && result.assets[0]?.uri) {
-        sendPhoto(result.assets[0].uri);
+      if (!result.canceled && result.assets.length > 0) {
+        for (const asset of result.assets) {
+          void sendPhoto(asset.uri);
+        }
       }
     } catch {
       Alert.alert("", "Could not open your photo library.");

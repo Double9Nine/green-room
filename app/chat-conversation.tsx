@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -772,7 +773,7 @@ export default function ChatConversationScreen() {
                 recalled: newMsg.recalled ?? false,
                 voiceUri: newMsg.voice_uri ?? undefined,
                 voiceDurationSec: newMsg.voice_duration_sec ?? undefined,
-                photoUri: newMsg.photo_uri ?? undefined,
+                imageUri: newMsg.photo_uri ?? undefined,
                 venueName: newMsg.venue_name ?? undefined,
                 venueArea: newMsg.venue_area ?? undefined,
               })
@@ -966,7 +967,7 @@ export default function ChatConversationScreen() {
               recalled: m.recalled ?? false,
               voiceUri: m.voice_uri ?? undefined,
               voiceDurationSec: m.voice_duration_sec ?? undefined,
-              photoUri: m.photo_uri ?? undefined,
+              imageUri: m.photo_uri ?? undefined,
               venueName: m.venue_name ?? undefined,
               venueArea: m.venue_area ?? undefined,
             }))
@@ -1311,10 +1312,74 @@ export default function ChatConversationScreen() {
   }, [inputText, persistAfterSend, scrollToEnd]);
 
   const sendPhoto = useCallback(
-    (uri: string) => {
-      appendMessage({ type: "photo", imageUri: uri, sent: true });
+    async (uri: string) => {
+      // Show local image immediately for good UX
+      appendMessage({ type: "photo", imageUri: uri, sent: true })
+
+      // Upload to Supabase Storage in background
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const filename = `${user.id}_${Date.now()}.jpg`
+        const conversationId = getConversationId(user.id, purePlayerId)
+        const path = `private/${conversationId}/${filename}`
+
+        // Read file as base64
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: 'base64',
+        })
+
+        const byteArray = Uint8Array.from(
+          atob(base64).split('').map(c => c.charCodeAt(0))
+        )
+
+        const { error } = await supabase.storage
+          .from('chat-images')
+          .upload(path, byteArray, {
+            contentType: 'image/jpeg',
+            upsert: false,
+          })
+
+        if (error) {
+          console.log('Storage upload error:', error.message)
+          return
+        }
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('chat-images')
+          .getPublicUrl(path)
+
+        // Update message with public URL
+        setMessages(prev => {
+          const updated = prev.map(m =>
+            m.imageUri === uri
+              ? { ...m, imageUri: publicUrl }
+              : m
+          )
+          messagesRef.current = updated
+          void AsyncStorage.setItem(MESSAGES_KEY, JSON.stringify(updated))
+          return updated
+        })
+
+        // Also update in Supabase messages table
+        try {
+          const msgs = messagesRef.current
+          const uploadedMsg = msgs.find(m => m.imageUri === uri)
+          if (uploadedMsg) {
+            await supabase.from('messages').update({
+              photo_uri: publicUrl
+            }).eq('id', uploadedMsg.id)
+          }
+        } catch {
+          // fail silently
+        }
+
+      } catch {
+        // fail silently
+      }
     },
-    [appendMessage]
+    [appendMessage, purePlayerId]
   );
 
   const shareVenueInChat = useCallback(
@@ -1345,10 +1410,11 @@ export default function ChatConversationScreen() {
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.85,
+        mediaTypes: ['images'] as any,
+        allowsEditing: true,
+        quality: 0.8,
       });
-      if (!result.canceled && result.assets[0]?.uri) {
+      if (!result.canceled) {
         sendPhoto(result.assets[0].uri);
       }
     } catch {
@@ -1367,11 +1433,15 @@ export default function ChatConversationScreen() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.85,
+        mediaTypes: ['images'] as any,
+        allowsMultipleSelection: true,
+        selectionLimit: 10,
+        quality: 0.8,
       });
-      if (!result.canceled && result.assets[0]?.uri) {
-        sendPhoto(result.assets[0].uri);
+      if (!result.canceled && result.assets.length > 0) {
+        for (const asset of result.assets) {
+          void sendPhoto(asset.uri);
+        }
       }
     } catch {
       Alert.alert("", "Could not open your photo library.");
