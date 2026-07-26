@@ -501,7 +501,7 @@ export default function ChatConversationScreen() {
   voiceInputModeRef.current = voiceInputMode;
 
   const scrollToEnd = useCallback(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 80);
   }, []);
 
   const showToast = useCallback((message: string, durationMs = 2500) => {
@@ -1568,12 +1568,70 @@ export default function ChatConversationScreen() {
 
     const sendVoice = () => {
       if (elapsed < 1 || !uri) return;
+
+      // Show local voice message immediately
       appendMessage({
         type: "voice",
         voiceUri: uri,
         voiceDurationSec: Math.min(elapsed, MAX_VOICE_SEC),
         sent: true,
       });
+
+      // Upload to Supabase Storage in background
+      void (async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user) return
+
+          const filename = `${user.id}_${Date.now()}.m4a`
+          const conversationId = getConversationId(user.id, purePlayerId)
+          const path = `private/${conversationId}/${filename}`
+
+          const base64 = await FileSystem.readAsStringAsync(uri, {
+            encoding: 'base64',
+          })
+
+          const byteArray = Uint8Array.from(
+            atob(base64).split('').map(c => c.charCodeAt(0))
+          )
+
+          const { error } = await supabase.storage
+            .from('chat-voice')
+            .upload(path, byteArray, {
+              contentType: 'audio/m4a',
+              upsert: false,
+            })
+
+          if (error) return
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('chat-voice')
+            .getPublicUrl(path)
+
+          // Update message with public URL
+          setMessages(prev => {
+            const updated = prev.map(m =>
+              m.voiceUri === uri
+                ? { ...m, voiceUri: publicUrl }
+                : m
+            )
+            messagesRef.current = updated
+            void AsyncStorage.setItem(MESSAGES_KEY, JSON.stringify(updated))
+            return updated
+          })
+
+          // Update in Supabase messages table
+          const uploadedMsg = messagesRef.current.find(m => m.voiceUri === uri)
+          if (uploadedMsg) {
+            await supabase.from('messages').update({
+              voice_uri: publicUrl
+            }).eq('id', uploadedMsg.id)
+          }
+
+        } catch {
+          // fail silently - local voice already shown
+        }
+      })()
     };
 
     hideCancelZone(() => {
@@ -1946,7 +2004,10 @@ export default function ChatConversationScreen() {
             contentContainerStyle={styles.messagesContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
-            onContentSizeChange={scrollToEnd}
+            onContentSizeChange={() => {
+              if (!messagesLoaded) return
+              scrollRef.current?.scrollToEnd({ animated: false })
+            }}
           >
             {messages.map((msg, index) => {
               const isSent = msg.sent;

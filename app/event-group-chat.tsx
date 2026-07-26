@@ -171,7 +171,7 @@ export default function EventGroupChatScreen() {
 
   const scrollToEnd = useCallback(() => {
     setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
+      scrollRef.current?.scrollToEnd({ animated: false });
     }, 80);
   }, []);
 
@@ -728,11 +728,67 @@ export default function EventGroupChatScreen() {
 
     const sendVoice = () => {
       if (elapsed < 1 || !uri) return;
+
+      // Show local voice message immediately
       appendMessage({
         type: "voice",
         voiceUri: uri,
         voiceDurationSec: Math.min(elapsed, MAX_VOICE_SEC),
       });
+
+      // Upload to Supabase Storage in background
+      void (async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user) return
+
+          const filename = `${user.id}_${Date.now()}.m4a`
+          const path = `group/${eventId}/${filename}`
+
+          const base64 = await FileSystem.readAsStringAsync(uri, {
+            encoding: 'base64',
+          })
+
+          const byteArray = Uint8Array.from(
+            atob(base64).split('').map(c => c.charCodeAt(0))
+          )
+
+          const { error } = await supabase.storage
+            .from('chat-voice')
+            .upload(path, byteArray, {
+              contentType: 'audio/m4a',
+              upsert: false,
+            })
+
+          if (error) return
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('chat-voice')
+            .getPublicUrl(path)
+
+          // Update message with public URL
+          setMessages(prev => {
+            const updated = prev.map(m =>
+              m.voiceUri === uri
+                ? { ...m, voiceUri: publicUrl }
+                : m
+            )
+            void saveGroupChatMessages(eventId, updated)
+            return updated
+          })
+
+          // Update in Supabase group_messages table
+          const uploadedMsg = messagesRef.current.find(m => m.voiceUri === uri)
+          if (uploadedMsg) {
+            await supabase.from('group_messages').update({
+              voice_uri: publicUrl
+            }).eq('id', uploadedMsg.id)
+          }
+
+        } catch {
+          // fail silently
+        }
+      })()
     };
 
     hideCancelZone(() => {
@@ -1053,7 +1109,9 @@ export default function EventGroupChatScreen() {
             contentContainerStyle={styles.messagesContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
-            onContentSizeChange={scrollToEnd}
+            onContentSizeChange={() => {
+              scrollRef.current?.scrollToEnd({ animated: false })
+            }}
           >
             {messages.length === 0 ? (
               <Text style={styles.chatEmptyText}>
