@@ -34,7 +34,6 @@ export default function MyProfileScreen() {
     AsyncStorage.getItem(USER_PROFILE_KEY).then((raw) => {
       if (raw) {
         const parsed = JSON.parse(raw)
-        console.log('my-profile gender:', parsed.gender)
         setProfile(parsed)
       }
     });
