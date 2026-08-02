@@ -11,6 +11,7 @@ import {
     NativeSyntheticEvent,
     Platform,
     Pressable,
+    ScrollView,
     StyleSheet,
     Text,
     View,
@@ -26,9 +27,9 @@ import { scoreCandidate, type MatchFilters } from '@/lib/matchScoring';
 import { supabase } from '@/lib/supabase';
 
 const { width, height } = Dimensions.get("window");
-const CARD_WIDTH = width * 0.71;
-const CARD_HEIGHT = height * 0.59;
-const CARD_MARGIN = 16;
+const CARD_WIDTH = width * 0.86;
+const CARD_HEIGHT = Math.min(height * 0.62, 540);
+const CARD_MARGIN = width * 0.03;
 const SNAP_INTERVAL = CARD_WIDTH + CARD_MARGIN;
 const SIDE_PADDING = (width - CARD_WIDTH) / 2;
 
@@ -221,14 +222,14 @@ function PlayerCard({
     <View
       style={[
         styles.cardOuter,
-        { width: CARD_WIDTH, height: CARD_HEIGHT },
+        { width: CARD_WIDTH, minHeight: CARD_HEIGHT },
         featured && styles.cardOuterFeatured,
       ]}
     >
       <View
         style={[
           styles.cardGoldFrame,
-          { width: CARD_WIDTH, height: CARD_HEIGHT },
+          { width: CARD_WIDTH, minHeight: CARD_HEIGHT },
         ]}
       >
         <LinearGradient
@@ -275,7 +276,11 @@ function PlayerCard({
                 </View>
                 <Text style={styles.playerName}>{player.name.toUpperCase()}</Text>
                 <Text style={styles.playerMeta}>
-                  {player.age} | {player.location}
+                  {[
+                    player.age,
+                    player.gender === 'Male' ? '♂ M' : player.gender === 'Female' ? '♀ F' : null,
+                    player.location,
+                  ].filter(Boolean).join(' | ')}
                 </Text>
               </View>
 
@@ -876,7 +881,7 @@ export default function MatchResultsScreen() {
                       <Animated.View
                         style={{
                           width: CARD_WIDTH,
-                          height: CARD_HEIGHT,
+                          minHeight: CARD_HEIGHT,
                           transform: [{ scale: carouselScale }],
                         }}
                       >
@@ -887,7 +892,7 @@ export default function MatchResultsScreen() {
                               params: { sport: params.sport || "tennis" },
                             })
                           }
-                          style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
+                          style={{ width: CARD_WIDTH, minHeight: CARD_HEIGHT }}
                         >
                           <LinearGradient
                             colors={["#6b4900", "#c8980a", "#d4af37"]}
@@ -895,7 +900,7 @@ export default function MatchResultsScreen() {
                               styles.cardGradient,
                               {
                                 width: CARD_WIDTH,
-                                height: CARD_HEIGHT,
+                                minHeight: CARD_HEIGHT,
                                 alignItems: "center",
                                 justifyContent: "center",
                                 gap: 14,
@@ -1054,7 +1059,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 4,
-    minHeight: 72,
+    minHeight: height * 0.08,
   },
   pageTitle: {
     textAlign: "center",
@@ -1073,7 +1078,7 @@ const styles = StyleSheet.create({
   carouselWrap: {
     width,
     alignSelf: "center",
-    marginTop: 40,
+    marginTop: height * 0.02,
   },
   emptyWrap: {
     flex: 1,
