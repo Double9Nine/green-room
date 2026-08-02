@@ -67,6 +67,19 @@ const SPARKLE_POSITIONS = [
 
 type Player = MatchPlayer;
 
+const AVAIL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const AVAIL_TIMES = ['Morning', 'Afternoon', 'Evening']
+
+function formatAvailability(keys: string[]): string {
+  if (!keys || keys.length === 0) return '—'
+  return keys.map(key => {
+    const [dayStr, timeStr] = key.split('-')
+    const day = AVAIL_DAYS[parseInt(dayStr)] ?? ''
+    const time = AVAIL_TIMES[parseInt(timeStr)] ?? ''
+    return `${day} ${time}`
+  }).join(', ')
+}
+
 const SKIPPED_KEY = "skippedPlayers";
 const MESSAGED_KEY = "messagedPlayers";
 const EXPIRED_KEY = "expiredMatches";
@@ -463,6 +476,7 @@ export default function MatchResultsScreen() {
     sportLabel?: string;
     sportScene?: string;
     skillLevels?: string;
+    userSkillLevel?: string;
     availability?: string;
     ageRange?: string;
     genderPreference?: string;
@@ -509,7 +523,7 @@ export default function MatchResultsScreen() {
       const profileRaw = await AsyncStorage.getItem('userProfile')
       const userProfile = profileRaw ? JSON.parse(profileRaw) : {}
       const userTags: string[] = userProfile.tags ?? []
-      const userSkillLevel: string = userProfile.skillLevel ?? ''
+        const userSkillLevel: string = params.userSkillLevel ?? userProfile.skillLevel ?? ''
 
       try {
         const { data: { user } } = await supabase.auth.getUser()
@@ -521,6 +535,7 @@ export default function MatchResultsScreen() {
             .select('*')
             .neq('id', user.id)
             .eq('sport', sportId)
+
 
           if (candidates && candidates.length > 0) {
             const filters: MatchFilters = {
@@ -554,8 +569,15 @@ export default function MatchResultsScreen() {
               const candidateAge = candidate.age ?? 25
               if (candidateAge < minAge || candidateAge > maxAge) continue
 
-              // Score the candidate
-              const result = scoreCandidate(candidate, filters)
+              // Parse availability safely (Supabase may return string or array)
+              const availArray: string[] = Array.isArray(candidate.availability)
+                ? candidate.availability
+                : typeof candidate.availability === 'string'
+                  ? (() => { try { return JSON.parse(candidate.availability) } catch { return [] } })()
+                  : []
+
+              // Score the candidate with parsed availability
+              const result = scoreCandidate({ ...candidate, availability: availArray }, filters)
               if (!result) continue
               if (result.score < 50) continue
 
@@ -565,17 +587,28 @@ export default function MatchResultsScreen() {
                 age: candidateAge,
                 location: candidate.location ?? '',
                 skill: candidate.skill_level ?? '',
-                availability: (candidate.availability ?? []).join(', '),
+                availability: formatAvailability(availArray),
                 purpose: candidate.purpose ?? '',
                 tags: candidate.tags ?? [],
                 photo: candidate.photo_url ?? null,
                 gamesPlayed: candidate.games_played ?? 0,
                 matchScore: result.score,
                 matchReasons: result.reasons,
+                gender: candidate.gender ?? undefined,
               })
             }
 
-            scored.sort((a, b) => b.matchScore - a.matchScore)
+            const genderPref = genderPreference[0] ?? ''
+            scored.sort((a, b) => {
+              if (genderPref === 'Prefer Women' || genderPref === 'Prefer Men') {
+                const preferredGender = genderPref === 'Prefer Women' ? 'Female' : 'Male'
+                const aMatch = a.gender === preferredGender
+                const bMatch = b.gender === preferredGender
+                if (aMatch && !bMatch) return -1
+                if (!aMatch && bMatch) return 1
+              }
+              return b.matchScore - a.matchScore
+            })
 
             if (scored.length > 0) {
               setPlayers(scored)
@@ -584,7 +617,6 @@ export default function MatchResultsScreen() {
           }
         }
       } catch (err) {
-        console.log('Supabase match error:', err)
       }
 
       // Fallback to dummy players
@@ -631,11 +663,13 @@ export default function MatchResultsScreen() {
 
   useEffect(() => {
     const saveSession = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       await AsyncStorage.setItem(
         "lastMatchSession",
         JSON.stringify({
           sport: params.sport,
           sportLabel: params.sportLabel,
+          userId: user?.id,
           timestamp: Date.now(),
         })
       );

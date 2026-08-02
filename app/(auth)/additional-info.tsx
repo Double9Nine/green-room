@@ -1,10 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { LocationPicker } from "@/components/LocationPicker";
 import { PhotoPicker } from "@/components/PhotoPicker";
@@ -44,7 +44,13 @@ export default function AdditionalInfoScreen() {
         gender: profile.gender ?? null,
         updated_at: new Date().toISOString(),
       })
+      if (upsertError) {
+        console.log('upsert error:', upsertError)
+      } else {
+        console.log('upsert success!')
+      }
     } catch (_err) {
+      console.log('saveToSupabase error:', _err)
     }
   }
 
@@ -58,11 +64,16 @@ export default function AdditionalInfoScreen() {
       );
       return;
     }
+    // Read gender from tempProfile
+    const tempRaw = await AsyncStorage.getItem('tempProfile')
+    const tempProfile = tempRaw ? JSON.parse(tempRaw) : {}
+
     const merged = await mergeUserProfile({
       work: occupation.trim(),
       university: university.trim(),
       photo: photoUri,
       location: locationLabel,
+      gender: tempProfile.gender ?? undefined,
     });
     await saveToSupabase(merged)
     void AsyncStorage.removeItem('tempProfile')

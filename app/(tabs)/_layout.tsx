@@ -30,13 +30,19 @@ export default function TabsLayout() {
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null
     let groupChannel: ReturnType<typeof supabase.channel> | null = null
+    let cleaned = false
 
     const setupRealtime = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      if (!user || cleaned) return
+
+      // Remove any existing channels first
+      await supabase.removeAllChannels()
+
+      if (cleaned) return
 
       channel = supabase
-        .channel('global-chat-badge')
+        .channel(`global-chat-badge-${user.id}`)
         .on(
           'postgres_changes',
           {
@@ -81,7 +87,7 @@ export default function TabsLayout() {
         .subscribe()
 
       groupChannel = supabase
-        .channel('global-group-chat-badge')
+        .channel(`global-group-chat-badge-${user.id}`)
         .on(
           'postgres_changes',
           {
@@ -128,6 +134,7 @@ export default function TabsLayout() {
     void setupRealtime()
 
     return () => {
+      cleaned = true
       if (channel) void supabase.removeChannel(channel)
       if (groupChannel) void supabase.removeChannel(groupChannel)
     }

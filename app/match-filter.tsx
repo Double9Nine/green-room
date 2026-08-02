@@ -23,6 +23,7 @@ import {
   SKILL_LEVELS,
   SPORTS,
 } from "@/constants/skillLevels";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { mergeUserProfile } from "@/lib/profileStorage";
 import { supabase } from "@/lib/supabase";
 
@@ -39,7 +40,6 @@ const GENDER_OPTIONS = [
   "Everyone Welcome 🤝",
   "Prefer Men",
   "Prefer Women",
-  "Mixed groups only",
 ] as const;
 
 const PURPOSE_OPTIONS = [
@@ -227,12 +227,24 @@ export default function MatchFilterScreen() {
         ? [...RUNNING_SKILL_LEVELS_MI]
         : [...RUNNING_SKILL_LEVELS_KM];
     }
+    if (showMatchLevel) {
+      return [...MATCH_LEVEL_OPTIONS]
+    }
     return SKILL_LEVELS[selectedSport.id] ?? SKILL_LEVELS.tennis;
-  }, [isRunning, runningUnit, selectedSport.id]);
+  }, [isRunning, runningUnit, selectedSport.id, showMatchLevel]);
 
   const [skillLevel, setSkillLevel] = useState<string>(
     () => SKILL_LEVELS.tennis[0] ?? ""
   );
+
+  const [mySkillLevel, setMySkillLevel] = useState<string>(
+    () => SKILL_LEVELS.tennis[0] ?? ""
+  )
+
+  useEffect(() => {
+    const levels = SKILL_LEVELS[selectedSport.id]
+    if (levels) setMySkillLevel(levels[0] ?? "")
+  }, [selectedSport.id])
 
   useEffect(() => {
     setGolfScene("driving_range");
@@ -295,6 +307,7 @@ export default function MatchFilterScreen() {
   const allFilled = useMemo(
     () =>
       Boolean(skillLevel?.trim()) &&
+      (showMatchLevel ? Boolean(mySkillLevel?.trim()) : true) &&
       availability.size >= 1 &&
       Boolean(gender?.trim()) &&
       Boolean(purpose?.trim()) &&
@@ -302,6 +315,8 @@ export default function MatchFilterScreen() {
       (!isRunning || Boolean(runningScene)),
     [
       skillLevel,
+      mySkillLevel,
+      showMatchLevel,
       availability,
       gender,
       purpose,
@@ -326,7 +341,7 @@ export default function MatchFilterScreen() {
     router.back();
   }, [router]);
 
-  const onStartMatching = useCallback(() => {
+  const onStartMatching = useCallback(async () => {
     const sportLabel = `${selectedSport.label} ${selectedSport.emoji}`;
     const availabilityList = [...availability].sort();
     const sceneLabel = isGolf
@@ -334,14 +349,36 @@ export default function MatchFilterScreen() {
       : isRunning
         ? RUNNING_SCENE_LABELS[runningScene]
         : null;
-    const profileSkillLevel =
-      sceneLabel && skillLevel ? `${sceneLabel} · ${skillLevel}` : skillLevel;
+    const profileSkillLevel = showMatchLevel
+      ? mySkillLevel
+      : sceneLabel && skillLevel
+        ? `${sceneLabel} · ${skillLevel}`
+        : skillLevel;
 
     void mergeUserProfile({
       sport: selectedSport.id,
       skillLevel: profileSkillLevel,
       availability: availabilityList,
-    });
+    })
+
+    // Also sync to Supabase
+    void (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          await supabase.from('profiles').update({
+            sport: selectedSport.id,
+            skill_level: profileSkillLevel,
+            availability: availabilityList,
+          }).eq('id', user.id)
+        }
+      } catch {
+        // fail silently
+      }
+    })()
+
+    const profileRaw = await AsyncStorage.getItem('userProfile')
+    const userProfile = profileRaw ? JSON.parse(profileRaw) : {}
 
     router.push({
       pathname: "/match-results",
@@ -350,6 +387,7 @@ export default function MatchFilterScreen() {
         sportLabel,
         sportScene: sceneLabel ?? "",
         skillLevels: JSON.stringify(skillLevel ? [skillLevel] : []),
+        userSkillLevel: showMatchLevel ? mySkillLevel : (skillLevel ?? ''),
         availability: JSON.stringify(availabilityList),
         ageRange: JSON.stringify([`${minAge}-${maxAge}`]),
         genderPreference: JSON.stringify(gender ? [gender] : []),
@@ -488,47 +526,67 @@ export default function MatchFilterScreen() {
 
         {showSkillSection ? (
           <>
-            <View style={styles.skillSectionHeader}>
-              <Text style={styles.sectionTitle}>
-                {isRunning ? "Pace" : "Skill Level"}
-              </Text>
-              {isRunning ? (
-                <View style={styles.unitToggleRow}>
-                  <Pressable
-                    onPress={() => setRunningUnit("mi")}
-                    style={[
-                      styles.unitToggleBtn,
-                      runningUnit === "mi" && styles.unitToggleBtnActive,
-                    ]}
+            {showMatchLevel ? (
+              <>
+                <Text style={styles.sectionTitle}>Your skill level</Text>
+                <View style={styles.sectionCard}>
+                  <Picker
+                    selectedValue={mySkillLevel}
+                    onValueChange={(value) => setMySkillLevel(String(value))}
+                    style={styles.wheelPicker}
+                    itemStyle={styles.wheelPickerItem}
                   >
-                    <Text
-                      style={[
-                        styles.unitToggleText,
-                        runningUnit === "mi" && styles.unitToggleTextActive,
-                      ]}
-                    >
-                      mi
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setRunningUnit("km")}
-                    style={[
-                      styles.unitToggleBtn,
-                      runningUnit === "km" && styles.unitToggleBtnActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.unitToggleText,
-                        runningUnit === "km" && styles.unitToggleTextActive,
-                      ]}
-                    >
-                      km
-                    </Text>
-                  </Pressable>
+                    {(SKILL_LEVELS[selectedSport.id] ?? []).map((opt) => (
+                      <Picker.Item key={opt} label={opt} value={opt} />
+                    ))}
+                  </Picker>
                 </View>
-              ) : null}
-            </View>
+                <Text style={styles.sectionTitle}>What level would you like to play with?</Text>
+              </>
+            ) : null}
+            {!showMatchLevel ? (
+              <View style={styles.skillSectionHeader}>
+                <Text style={styles.sectionTitle}>
+                  {isRunning ? "Pace" : "Skill Level"}
+                </Text>
+                {isRunning ? (
+                  <View style={styles.unitToggleRow}>
+                    <Pressable
+                      onPress={() => setRunningUnit("mi")}
+                      style={[
+                        styles.unitToggleBtn,
+                        runningUnit === "mi" && styles.unitToggleBtnActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.unitToggleText,
+                          runningUnit === "mi" && styles.unitToggleTextActive,
+                        ]}
+                      >
+                        mi
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setRunningUnit("km")}
+                      style={[
+                        styles.unitToggleBtn,
+                        runningUnit === "km" && styles.unitToggleBtnActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.unitToggleText,
+                          runningUnit === "km" && styles.unitToggleTextActive,
+                        ]}
+                      >
+                        km
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
             <View style={styles.sectionCard}>
               <Picker
                 selectedValue={skillLevel}
@@ -652,7 +710,7 @@ export default function MatchFilterScreen() {
           ))}
         </View>
 
-        <Text style={styles.sectionTitle}>Gender Preference</Text>
+        <Text style={styles.sectionTitle}>Who would you like to play with?</Text>
         <View style={styles.sectionCard}>
           <Picker
             selectedValue={gender}
@@ -666,13 +724,7 @@ export default function MatchFilterScreen() {
           </Picker>
         </View>
 
-        {showMatchLevel ? (
-          <Text style={styles.sectionQuestion}>
-            What level would you like to play with?
-          </Text>
-        ) : (
-          <Text style={styles.sectionTitle}>Purpose</Text>
-        )}
+        <Text style={styles.sectionTitle}>Purpose</Text>
         <View style={styles.sectionCard}>
           <Picker
             selectedValue={purpose}
@@ -680,13 +732,9 @@ export default function MatchFilterScreen() {
             style={styles.wheelPicker}
             itemStyle={styles.wheelPickerItem}
           >
-            {showMatchLevel
-              ? MATCH_LEVEL_OPTIONS.map((opt) => (
-                  <Picker.Item key={opt} label={opt} value={opt} />
-                ))
-              : PURPOSE_OPTIONS.map((opt) => (
-                  <Picker.Item key={opt} label={opt} value={opt} />
-                ))}
+            {PURPOSE_OPTIONS.map((opt) => (
+              <Picker.Item key={opt} label={opt} value={opt} />
+            ))}
           </Picker>
         </View>
       </ScrollView>

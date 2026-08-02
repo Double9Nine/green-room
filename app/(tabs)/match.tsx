@@ -6,6 +6,7 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { getSkillLevelCount, SPORTS } from "@/constants/skillLevels";
+import { supabase } from "@/lib/supabase";
 
 const H_PADDING = 20;
 const ROW_GAP = 18;
@@ -74,12 +75,36 @@ export default function MatchScreen() {
           setSessionChecked(true);
           return;
         }
+
+        const session = JSON.parse(raw) as {
+          sport: string;
+          sportLabel: string;
+          userId?: string;
+          timestamp?: number;
+        };
+
+        // Check session belongs to current user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || (session.userId && session.userId !== user.id)) {
+          await AsyncStorage.removeItem("lastMatchSession");
+          redirectedRef.current = false;
+          setSessionChecked(true);
+          return;
+        }
+
+        // Check session is not too old (30 minutes)
+        if (session.timestamp && Date.now() - session.timestamp > 30 * 60 * 1000) {
+          await AsyncStorage.removeItem("lastMatchSession");
+          redirectedRef.current = false;
+          setSessionChecked(true);
+          return;
+        }
+
         if (redirectedRef.current) {
           setSessionChecked(true);
           return;
         }
         redirectedRef.current = true;
-        const session = JSON.parse(raw) as { sport: string; sportLabel: string };
         router.replace({
           pathname: "/match-results",
           params: {

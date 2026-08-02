@@ -108,13 +108,6 @@ export function scoreCandidate(
   filters: MatchFilters
 ): { score: number; reasons: string[] } | null {
 
-  // Hard filter: gender preference
-  if (filters.genderPreference.length > 0) {
-    const pref = filters.genderPreference[0]
-    if (pref === 'Women only' && candidate.gender !== 'Female') return null
-    if (pref === 'Men only' && candidate.gender !== 'Male') return null
-  }
-
   // Hard filter: skill level (only for tennis/badminton/pickleball/golf)
   if (MATCH_LEVEL_SPORT_IDS.includes(filters.sport)) {
     const validLevels = getValidSkillLevels(

@@ -11,6 +11,7 @@ export type MatchPlayer = {
   gamesPlayed: number;
   matchScore: number;
   matchReasons: string[];
+  gender?: string;
 };
 
 export const sportPlayerMap: Record<string, number[]> = {
