@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import Swipeable from "react-native-gesture-handler/Swipeable";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -163,6 +164,8 @@ export type PlazaEvent = {
   photo?: string | null;
   lat?: number | null;
   lng?: number | null;
+  sportEmoji?: string;
+  organizer_id?: string;
 };
 
 type PlacePrediction = {
@@ -467,7 +470,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Morning Tennis Singles Match",
     location: "Central Park Tennis Courts, NY",
     distance: "0.8 mi",
-    time: "2026-08-05T09:00:00",
+    time: "2026-09-05T09:00:00",
     postedAgo: "1h ago",
     spots: 2,
     maxSpots: 2,
@@ -484,7 +487,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Pickleball Beginner Meetup",
     location: "Hudson Yards Courts, NY",
     distance: "1.2 mi",
-    time: "2026-08-05T11:00:00",
+    time: "2026-09-05T11:00:00",
     postedAgo: "2h ago",
     spots: 3,
     maxSpots: 6,
@@ -501,7 +504,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Padel Doubles Session",
     location: "Padel Haus, Brooklyn",
     distance: "2.1 mi",
-    time: "2026-08-06T19:00:00",
+    time: "2026-09-06T19:00:00",
     postedAgo: "3h ago",
     spots: 2,
     maxSpots: 4,
@@ -518,7 +521,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Central Park 5K Group Run",
     location: "Central Park, NY",
     distance: "0.5 mi",
-    time: "2026-08-05T06:30:00",
+    time: "2026-09-05T06:30:00",
     postedAgo: "30m ago",
     spots: 8,
     maxSpots: 15,
@@ -552,7 +555,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "3v3 Basketball Pickup",
     location: "West 4th Street Courts, NY",
     distance: "0.9 mi",
-    time: "2026-08-06T17:00:00",
+    time: "2026-09-06T17:00:00",
     postedAgo: "5h ago",
     spots: 2,
     maxSpots: 6,
@@ -586,7 +589,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Casual Badminton Session",
     location: "YMCA Courts, Brooklyn",
     distance: "2.1 mi",
-    time: "2026-08-06T19:00:00",
+    time: "2026-09-06T19:00:00",
     postedAgo: "7h ago",
     spots: 3,
     maxSpots: 4,
@@ -603,7 +606,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Indoor Bouldering Session",
     location: "Brooklyn Boulders, Brooklyn",
     distance: "2.5 mi",
-    time: "2026-08-06T18:00:00",
+    time: "2026-09-06T18:00:00",
     postedAgo: "8h ago",
     spots: 5,
     maxSpots: 8,
@@ -705,7 +708,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Table Tennis Round Robin",
     location: "Fat Cat, Greenwich Village",
     distance: "1.1 mi",
-    time: "2026-08-17T19:00:00",
+    time: "2026-09-17T19:00:00",
     postedAgo: "14h ago",
     spots: 4,
     maxSpots: 8,
@@ -722,7 +725,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Sports Mixer & Happy Hour",
     location: "Slate NY, Midtown",
     distance: "2.3 mi",
-    time: "2026-08-17T18:30:00",
+    time: "2026-09-17T18:30:00",
     postedAgo: "15h ago",
     spots: 12,
     maxSpots: 30,
@@ -823,7 +826,7 @@ const DUMMY_EVENTS: PlazaEvent[] = [
     title: "Full Court 5v5 Basketball",
     location: "West 4th Street Courts, NY",
     distance: "1.1 mi",
-    time: "2026-08-05T18:00:00",
+    time: "2026-09-05T18:00:00",
     postedAgo: "Just now",
     spots: 10,
     maxSpots: 10,
@@ -1160,6 +1163,7 @@ export default function ExploreScreen() {
   const [selectedSport, setSelectedSport] = useState("All Sports");
   const [sortBy, setSortBy] = useState<(typeof SORT_OPTIONS)[number]>("Soonest");
   const [myEvents, setMyEvents] = useState<PlazaEvent[]>([]);
+  const [supabaseEvents, setSupabaseEvents] = useState<PlazaEvent[]>([]);
   const [joinedIds, setJoinedIds] = useState<number[]>([]);
   const [likedIds, setLikedIds] = useState<Set<number>>(new Set());
   const [eventLikesCount, setEventLikesCount] = useState<Record<string, number>>({});
@@ -1560,6 +1564,44 @@ export default function ExploreScreen() {
       void loadJoinedRequests();
       void checkExpiredEvents();
 
+      // Fetch all events from Supabase
+      void (async () => {
+        try {
+          const { data: supabaseEventsData } = await supabase
+            .from('events')
+            .select('*')
+            .order('date_time', { ascending: true })
+
+          if (supabaseEventsData && supabaseEventsData.length > 0) {
+            const mapped: PlazaEvent[] = supabaseEventsData.map((e: any) => ({
+              id: Number(e.id),
+              user: e.organizer_name ?? '',
+              organizer: e.organizer_name ?? '',
+              organizerInitial: (e.organizer_name ?? '?')[0].toUpperCase(),
+              sport: e.sport ?? '',
+              sportEmoji: e.sport_emoji ?? '',
+              title: e.title ?? '',
+              location: e.location ?? '',
+              distance: '',
+              time: e.date_time ?? '',
+              postedAgo: '',
+              spots: e.current_spots ?? 0,
+              maxSpots: e.max_spots ?? 0,
+              likes: e.likes ?? 0,
+              comments: 0,
+              details: e.description ?? '',
+              photo: e.photo_url ?? null,
+              lat: e.lat ?? null,
+              lng: e.lng ?? null,
+              organizer_id: e.organizer_id,
+            }))
+            setSupabaseEvents(mapped)
+          }
+        } catch {
+          // fail silently
+        }
+      })()
+
       AsyncStorage.getItem("conversations").then((raw) => {
         if (raw) {
           try {
@@ -1636,7 +1678,26 @@ export default function ExploreScreen() {
   const allDiscoverEvents = useMemo(() => {
     const dummyIds = new Set(DUMMY_EVENTS.map((e) => e.id));
     const created = myEvents.filter((e) => !dummyIds.has(e.id));
-    const merged = [...created, ...DUMMY_EVENTS].map((e) => {
+
+    // Merge: user-created events + supabaseEvents (no duplicates) + DUMMY_EVENTS
+    const allReal = [...created]
+    for (const e of supabaseEvents) {
+      if (!allReal.find(r => r.id === e.id)) {
+        allReal.push(e)
+      }
+    }
+
+    const merged = [...allReal, ...DUMMY_EVENTS].map((e) => {
+      const isSupabaseEvent = supabaseEvents.some(s => s.id === e.id)
+        && !myEvents.some(m => m.id === e.id)
+
+      if (isSupabaseEvent) {
+        return {
+          ...e,
+          spots: e.spots,
+        }
+      }
+
       const confirmed = getConfirmedForEvent(eventMembersMap, e.id);
       const { spotsTaken } = resolveEventSpotsAndMembers(
         e,
@@ -1651,7 +1712,7 @@ export default function ExploreScreen() {
     const fullDemo = merged.find((e) => e.id === 99);
     if (!fullDemo) return merged;
     return [fullDemo, ...merged.filter((e) => e.id !== 99)];
-  }, [myEvents, eventMembersMap]);
+  }, [myEvents, supabaseEvents, eventMembersMap]);
 
   const filteredDiscover = useMemo(() => {
     let list = [...allDiscoverEvents];
@@ -1927,6 +1988,42 @@ export default function ExploreScreen() {
 
     const user = await getCurrentUser();
 
+    let uploadedPhotoUrl: string | null = eventPhoto
+
+    if (eventPhoto && !eventPhoto.startsWith('http')) {
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser()
+        if (authUser) {
+          const filename = `${authUser.id}_${Date.now()}.jpg`
+          const path = `events/${filename}`
+
+          const base64 = await FileSystem.readAsStringAsync(eventPhoto, {
+            encoding: 'base64',
+          })
+
+          const byteArray = Uint8Array.from(
+            atob(base64).split('').map(c => c.charCodeAt(0))
+          )
+
+          const { error } = await supabase.storage
+            .from('event-images')
+            .upload(path, byteArray, {
+              contentType: 'image/jpeg',
+              upsert: false,
+            })
+
+          if (!error) {
+            const { data: { publicUrl } } = supabase.storage
+              .from('event-images')
+              .getPublicUrl(path)
+            uploadedPhotoUrl = publicUrl
+          }
+        }
+      } catch {
+        // fail silently - use local photo
+      }
+    }
+
     const newEvent: PlazaEvent = {
       id: Date.now(),
       user: user.name,
@@ -1954,7 +2051,7 @@ export default function ExploreScreen() {
       details: details.trim(),
       dateLabel: dateStr,
       timeLabel: timeStr,
-      photo: eventPhoto || null,
+      photo: uploadedPhotoUrl || null,
       lat: eventLat,
       lng: eventLng,
     };
@@ -1976,7 +2073,10 @@ export default function ExploreScreen() {
           date_time: newEvent.time,
           max_spots: newEvent.maxSpots,
           current_spots: 1,
-          photo_url: newEvent.photo ?? null,
+          photo_url: uploadedPhotoUrl ?? null,
+          lat: newEvent.lat ?? null,
+          lng: newEvent.lng ?? null,
+          likes: 0,
           updated_at: new Date().toISOString(),
         })
 
