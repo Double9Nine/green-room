@@ -171,6 +171,29 @@ export default function LoginScreen() {
           // fail silently
         }
 
+        // Fetch pending event requests for my events
+        try {
+          const { data: myEvents } = await supabase
+            .from('events')
+            .select('id')
+            .eq('organizer_id', data.user.id)
+
+          if (myEvents && myEvents.length > 0) {
+            const myEventIds = myEvents.map(e => e.id)
+            const { data: pendingRequests } = await supabase
+              .from('event_attendees')
+              .select('id')
+              .in('event_id', myEventIds)
+              .eq('status', 'pending')
+              .neq('user_id', data.user.id)
+
+            const count = pendingRequests?.length ?? 0
+            await AsyncStorage.setItem('exploreBadge', String(count))
+          }
+        } catch {
+          // fail silently
+        }
+
         router.replace("/(tabs)/match")
       }
     } catch (err) {

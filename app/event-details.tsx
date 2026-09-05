@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { supabase } from '@/lib/supabase'
 import { Ionicons } from "@expo/vector-icons";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -355,15 +356,35 @@ export default function EventDetailsScreen() {
 
   const handleRequestToJoin = async () => {
     if (!event || cannotJoin) return;
+
+    const { data: { user } } = await supabase.auth.getUser()
+    const userId = user?.id ?? CURRENT_USER_ID
+
     await submitJoinRequest(
       event.id,
       {
         name: currentUser.name,
         initial: currentUser.initial,
-        userId: CURRENT_USER_ID,
+        userId: userId,
       },
       event as unknown as Record<string, unknown>
     );
+
+    // Also save to Supabase event_attendees
+    if (user) {
+      try {
+        await supabase.from('event_attendees').upsert({
+          event_id: String(event.id),
+          user_id: user.id,
+          status: 'pending',
+          attended: null,
+          attendance_answered: false,
+        })
+      } catch {
+        // fail silently
+      }
+    }
+
     setMyStatus("pending");
     await refreshState();
   };

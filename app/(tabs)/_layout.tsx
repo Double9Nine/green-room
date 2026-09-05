@@ -30,6 +30,7 @@ export default function TabsLayout() {
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null
     let groupChannel: ReturnType<typeof supabase.channel> | null = null
+    let requestChannel: ReturnType<typeof supabase.channel> | null = null
     let cleaned = false
 
     const setupRealtime = async () => {
@@ -129,6 +130,43 @@ export default function TabsLayout() {
           }
         )
         .subscribe()
+
+      requestChannel = supabase
+        .channel(`global-event-requests-${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'event_attendees',
+          },
+          async (payload) => {
+            const newRequest = payload.new as any
+            if (newRequest.user_id === user.id) return // ignore own joins
+
+            // Check if this request is for one of my events
+            try {
+              const { data: event } = await supabase
+                .from('events')
+                .select('organizer_id')
+                .eq('id', newRequest.event_id)
+                .single()
+
+              if (event?.organizer_id !== user.id) return
+              if (newRequest.status !== 'pending') return
+
+              // Increment explore badge
+              const raw = await AsyncStorage.getItem('exploreBadge')
+              const current = raw ? parseInt(raw) : 0
+              const next = current + 1
+              await AsyncStorage.setItem('exploreBadge', String(next))
+              setExploreBadge(next)
+            } catch {
+              // fail silently
+            }
+          }
+        )
+        .subscribe()
     }
 
     void setupRealtime()
@@ -137,25 +175,38 @@ export default function TabsLayout() {
       cleaned = true
       if (channel) void supabase.removeChannel(channel)
       if (groupChannel) void supabase.removeChannel(groupChannel)
+      if (requestChannel) void supabase.removeChannel(requestChannel)
     }
   }, [])
 
   useFocusEffect(
     useCallback(() => {
       const loadBadges = async () => {
-        const allRequests = await loadEventRequests()
+        // Get pending requests from Supabase
+        let pendingCount = 0
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user) {
+            const { data: myEvents } = await supabase
+              .from('events')
+              .select('id')
+              .eq('organizer_id', user.id)
 
-        // Get my events to filter out stale requests
-        const myEventsRaw = await AsyncStorage.getItem('myEvents')
-        const myEvents = myEventsRaw ? JSON.parse(myEventsRaw) : []
-        const myEventIds = myEvents.map((e: any) => e.id)
+            if (myEvents && myEvents.length > 0) {
+              const myEventIds = myEvents.map((e: any) => e.id)
+              const { data: pendingRequests } = await supabase
+                .from('event_attendees')
+                .select('id')
+                .in('event_id', myEventIds)
+                .eq('status', 'pending')
+                .neq('user_id', user.id)
 
-        const pendingCount = allRequests.filter(
-          (r) => r.status === 'pending'
-            && r.userId !== CURRENT_USER_ID
-            && myEventIds.includes(r.eventId)
-            && myEvents.find((e: any) => e.id === r.eventId)?.status !== 'past'
-        ).length
+              pendingCount = pendingRequests?.length ?? 0
+            }
+          }
+        } catch {
+          // fail silently - use 0
+        }
 
         const status = await getJoinedStatusChangesCount();
         const explore = pendingCount + status;

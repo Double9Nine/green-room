@@ -2355,6 +2355,17 @@ export default function ExploreScreen() {
     }
 
     await approveJoinRequest(eventId, userId);
+
+    // Also update Supabase
+    try {
+      await supabase.from('event_attendees').update({
+        status: 'approved',
+      }).eq('event_id', String(eventId))
+        .eq('user_id', userId)
+    } catch {
+      // fail silently
+    }
+
     await refreshRequestData();
 
     const pending = await loadEventRequests();
@@ -2403,6 +2414,17 @@ export default function ExploreScreen() {
 
   const handleDeclineRequest = async (eventId: number, userId: string) => {
     await declineJoinRequest(eventId, userId);
+
+    // Also update Supabase for reject
+    try {
+      await supabase.from('event_attendees').update({
+        status: 'rejected',
+      }).eq('event_id', String(eventId))
+        .eq('user_id', userId)
+    } catch {
+      // fail silently
+    }
+
     await refreshRequestData();
 
     const pending = await loadEventRequests();
