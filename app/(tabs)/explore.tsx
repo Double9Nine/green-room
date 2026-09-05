@@ -2087,6 +2087,29 @@ export default function ExploreScreen() {
           attended: null,
           attendance_answered: false,
         })
+
+        // Auto-create group chat conversation
+        try {
+          const existingRaw = await AsyncStorage.getItem('groupChatConversations')
+          const existing = existingRaw ? JSON.parse(existingRaw) : []
+          const alreadyExists = existing.find((e: any) => e.eventId === String(newEvent.id))
+          if (!alreadyExists) {
+            const placeholder = SPORT_PLACEHOLDER[newEvent.sport] ?? SPORT_PLACEHOLDER.Tennis
+            existing.unshift({
+              eventId: String(newEvent.id),
+              eventTitle: newEvent.title,
+              sportEmoji: placeholder.emoji,
+              organizer: newEvent.organizer,
+              lastMessage: '',
+              lastMessageTime: Date.now(),
+              unread: false,
+              unreadCount: 0,
+            })
+            await AsyncStorage.setItem('groupChatConversations', JSON.stringify(existing))
+          }
+        } catch {
+          // fail silently
+        }
       }
     } catch {
       // fail silently - local data already saved

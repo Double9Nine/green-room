@@ -80,6 +80,7 @@ type ChatMember = {
   name: string;
   initial: string;
   isOrganizer: boolean;
+  userId?: string;
 };
 
 function formatMessageTime(date: Date): string {
@@ -236,6 +237,37 @@ export default function EventGroupChatScreen() {
 
     const membersRaw = await AsyncStorage.getItem(EVENT_MEMBERS_KEY);
     const allMembers = membersRaw ? JSON.parse(membersRaw) : {};
+
+    try {
+      const { data: attendees } = await supabase
+        .from('event_attendees')
+        .select(`
+          user_id,
+          status,
+          profiles (
+            name,
+            gender
+          )
+        `)
+        .eq('event_id', eventId)
+        .in('status', ['approved', 'confirmed'])
+
+      if (attendees && attendees.length > 0) {
+        const supabaseMembers: ChatMember[] = attendees
+          .filter((a: any) => a.profiles?.name)
+          .map((a: any) => ({
+            name: a.profiles.name,
+            initial: a.profiles.name[0]?.toUpperCase() ?? '?',
+            isOrganizer: a.profiles.name === organizer,
+            userId: a.user_id,
+          }))
+        setConfirmedMembers(supabaseMembers)
+        return
+      }
+    } catch {
+      // fall through to local data
+    }
+
     const approvedRaw = (allMembers[eventId] || []).filter(
       (m: { name?: string; userName?: string }) => m && (m.name || m.userName)
     );

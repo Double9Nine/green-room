@@ -31,6 +31,7 @@ export default function TabsLayout() {
     let channel: ReturnType<typeof supabase.channel> | null = null
     let groupChannel: ReturnType<typeof supabase.channel> | null = null
     let requestChannel: ReturnType<typeof supabase.channel> | null = null
+    let approvalChannel: ReturnType<typeof supabase.channel> | null = null
     let cleaned = false
 
     const setupRealtime = async () => {
@@ -167,6 +168,63 @@ export default function TabsLayout() {
           }
         )
         .subscribe()
+
+      approvalChannel = supabase
+        .channel(`my-event-approvals-${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'event_attendees',
+            filter: `user_id=eq.${user.id}`,
+          },
+          async (payload) => {
+            const updated = payload.new as any
+            if (updated.status !== 'approved' && updated.status !== 'confirmed') return
+
+            // Fetch event details and add to group chat
+            try {
+              const { data: event } = await supabase
+                .from('events')
+                .select('id, title, sport_emoji, organizer_name')
+                .eq('id', updated.event_id)
+                .single()
+
+              if (event) {
+                const existingRaw = await AsyncStorage.getItem('groupChatConversations')
+                const existing = existingRaw ? JSON.parse(existingRaw) : []
+                const alreadyExists = existing.find((e: any) => e.eventId === String(event.id))
+
+                if (!alreadyExists) {
+                  const newConvo = {
+                    eventId: String(event.id),
+                    eventTitle: event.title ?? '',
+                    sportEmoji: event.sport_emoji ?? '🎾',
+                    organizer: event.organizer_name ?? '',
+                    lastMessage: '',
+                    lastMessageTime: Date.now(),
+                    unread: true,
+                    unreadCount: 0,
+                  }
+                  await AsyncStorage.setItem(
+                    'groupChatConversations',
+                    JSON.stringify([newConvo, ...existing])
+                  )
+                  // Update chat badge
+                  const [priv, grp] = await Promise.all([
+                    getUnreadPrivateCount(),
+                    getUnreadGroupCount(),
+                  ])
+                  setChatBadge(priv + grp + 1)
+                }
+              }
+            } catch {
+              // fail silently
+            }
+          }
+        )
+        .subscribe()
     }
 
     void setupRealtime()
@@ -176,6 +234,7 @@ export default function TabsLayout() {
       if (channel) void supabase.removeChannel(channel)
       if (groupChannel) void supabase.removeChannel(groupChannel)
       if (requestChannel) void supabase.removeChannel(requestChannel)
+      if (approvalChannel) void supabase.removeChannel(approvalChannel)
     }
   }, [])
 

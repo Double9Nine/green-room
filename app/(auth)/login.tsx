@@ -180,6 +180,40 @@ export default function LoginScreen() {
             .select('id')
             .eq('organizer_id', data.user.id)
 
+          // Create group chat conversations for events I organize
+          if (myEvents && myEvents.length > 0) {
+            try {
+              const { data: myEventsData } = await supabase
+                .from('events')
+                .select('id, title, sport_emoji, organizer_name')
+                .eq('organizer_id', data.user.id)
+
+              if (myEventsData && myEventsData.length > 0) {
+                const existingRaw = await AsyncStorage.getItem('groupChatConversations')
+                const existing = existingRaw ? JSON.parse(existingRaw) : []
+
+                for (const event of myEventsData) {
+                  const alreadyExists = existing.find((e: any) => e.eventId === String(event.id))
+                  if (!alreadyExists) {
+                    existing.unshift({
+                      eventId: String(event.id),
+                      eventTitle: event.title ?? '',
+                      sportEmoji: event.sport_emoji ?? '🎾',
+                      organizer: event.organizer_name ?? '',
+                      lastMessage: '',
+                      lastMessageTime: Date.now(),
+                      unread: false,
+                      unreadCount: 0,
+                    })
+                  }
+                }
+                await AsyncStorage.setItem('groupChatConversations', JSON.stringify(existing))
+              }
+            } catch {
+              // fail silently
+            }
+          }
+
           if (myEvents && myEvents.length > 0) {
             const myEventIds = myEvents.map(e => e.id)
             const { data: pendingRequests } = await supabase
