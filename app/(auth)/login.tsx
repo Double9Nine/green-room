@@ -129,15 +129,17 @@ export default function LoginScreen() {
           const { data: groupConvosData } = await supabase
             .from('event_attendees')
             .select(`
-              event_id,
-              events (
-                id,
-                title,
-                sport_emoji,
-                organizer_name
-              )
-            `)
+    event_id,
+    status,
+    events (
+      id,
+      title,
+      sport_emoji,
+      organizer_name
+    )
+  `)
             .eq('user_id', data.user.id)
+            .in('status', ['approved', 'confirmed'])
 
           if (groupConvosData && groupConvosData.length > 0) {
             const existingRaw = await AsyncStorage.getItem('groupChatConversations')
