@@ -214,7 +214,7 @@ export default function EventDetailsScreen() {
       : event.spots >= event.maxSpots
     : false;
 
-  const cannotJoin = isOrganizer ? false : (event?.spots ?? 0) >= maxSpots;
+  const cannotJoin = !event ? true : isOrganizer ? false : event.spots >= event.maxSpots;
 
   const isPastEvent = event
     ? isEventExpired(event) || (event as unknown as { status?: string }).status === "past"
