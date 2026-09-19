@@ -1216,7 +1216,6 @@ export default function ExploreScreen() {
   >([]);
   const [shareModalEvent, setShareModalEvent] = useState<PlazaEvent | null>(null);
   const loadStorage = useCallback(async () => {
-    console.log('loadStorage called')
     try {
       await ensureDemoEventSeed();
       const [myRaw, joinedRaw, likedRaw, requests, pending, members] = await Promise.all([
@@ -1284,9 +1283,7 @@ export default function ExploreScreen() {
 
       // Fetch pending requests from Supabase for my events
       try {
-        console.log('fetching pending from Supabase...')
         const { data: { user } } = await supabase.auth.getUser()
-        console.log('user for pending fetch:', user?.id)
         if (user) {
           const { data: myEventsData } = await supabase
             .from('events')
@@ -1295,7 +1292,7 @@ export default function ExploreScreen() {
 
           if (myEventsData && myEventsData.length > 0) {
             const myEventIds = myEventsData.map((e: any) => e.id)
-            const { data: pendingAttendees, error: pendingError } = await supabase
+            const { data: pendingAttendees } = await supabase
               .from('event_attendees')
               .select('event_id, user_id, status, joined_at')
               .in('event_id', myEventIds)
@@ -1313,9 +1310,6 @@ export default function ExploreScreen() {
               profileMap[p.id] = p.name
             }
 
-            console.log('pendingError:', pendingError)
-            console.log('pendingAttendees:', pendingAttendees?.length, pendingAttendees)
-            console.log('pendingAttendees with profiles:', JSON.stringify(pendingAttendees))
             if (pendingAttendees && pendingAttendees.length > 0) {
               const supabasePending: EventRequestsByEvent = {}
               for (const a of pendingAttendees) {
@@ -1332,7 +1326,6 @@ export default function ExploreScreen() {
               }
               await savePendingRequests(supabasePending)
               setPendingMap(supabasePending)
-              console.log('supabasePending:', JSON.stringify(supabasePending))
             }
           }
         }

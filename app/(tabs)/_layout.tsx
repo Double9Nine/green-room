@@ -143,7 +143,6 @@ export default function TabsLayout() {
           },
           async (payload) => {
             const newRequest = payload.new as any
-            console.log('event_attendees INSERT received:', payload.new)
             if (newRequest.user_id === user.id) return // ignore own joins
 
             // Check if this request is for one of my events
@@ -154,7 +153,6 @@ export default function TabsLayout() {
                 .eq('id', newRequest.event_id)
                 .single()
 
-              console.log('organizer_id:', event?.organizer_id, 'user.id:', user.id)
               if (event?.organizer_id !== user.id) return
               if (newRequest.status !== 'pending') return
 
@@ -169,9 +167,7 @@ export default function TabsLayout() {
             }
           }
         )
-        .subscribe((status) => {
-          console.log('requestChannel subscribed', status)
-        })
+        .subscribe()
 
       approvalChannel = supabase
         .channel(`my-event-approvals-${user.id}`)
