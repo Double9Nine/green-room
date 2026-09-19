@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Audio } from "expo-av";
+import { useAudioPlayer, useAudioRecorder, AudioModule, RecordingPresets } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
@@ -198,77 +198,30 @@ function VoiceMessageBubble({
   msg: ChatMessage;
   isSent: boolean;
 }) {
-  const soundRef = useRef<Audio.Sound | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [positionMs, setPositionMs] = useState(0);
-  const [durationMs, setDurationMs] = useState(
-    (msg.voiceDurationSec ?? 0) * 1000
-  );
+  const player = useAudioPlayer(msg.voiceUri ? { uri: msg.voiceUri } : null)
+  const [playing, setPlaying] = useState(false)
+  const [positionMs, setPositionMs] = useState(0)
+  const [durationMs, setDurationMs] = useState((msg.voiceDurationSec ?? 0) * 1000)
 
   const durationLabel = formatVoiceDuration(msg.voiceDurationSec ?? 0);
-  const progress =
-    durationMs > 0 ? Math.min(1, positionMs / durationMs) : 0;
-
-  const unloadSound = useCallback(async () => {
-    const sound = soundRef.current;
-    soundRef.current = null;
-    if (!sound) return;
-    try {
-      await sound.unloadAsync();
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      void unloadSound();
-    };
-  }, [unloadSound]);
+  const progress = durationMs > 0 ? Math.min(1, positionMs / durationMs) : 0
 
   const togglePlay = async () => {
-    if (!msg.voiceUri) return;
-
+    if (!msg.voiceUri) return
     try {
-      if (playing && soundRef.current) {
-        await soundRef.current.pauseAsync();
-        setPlaying(false);
-        return;
+      await AudioModule.setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+      })
+      if (playing) {
+        player.pause()
+        setPlaying(false)
+      } else {
+        player.play()
+        setPlaying(true)
       }
-
-      if (soundRef.current) {
-        await soundRef.current.playAsync();
-        setPlaying(true);
-        return;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      });
-
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: msg.voiceUri },
-        { shouldPlay: true },
-        (status) => {
-          if (!status.isLoaded) return;
-          setPositionMs(status.positionMillis ?? 0);
-          if (status.durationMillis != null) {
-            setDurationMs(status.durationMillis);
-          }
-          if (status.didJustFinish) {
-            setPlaying(false);
-            setPositionMs(0);
-            void sound.setPositionAsync(0);
-          }
-        }
-      );
-
-      soundRef.current = sound;
-      setPlaying(true);
     } catch {
-      Alert.alert("", "Could not play this voice message.");
-      setPlaying(false);
+      setPlaying(false)
     }
   };
 
@@ -374,7 +327,7 @@ export default function ChatConversationScreen() {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY)
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordStartRef = useRef(0);
   const isRecordingRef = useRef(false);
@@ -1501,12 +1454,9 @@ export default function ChatConversationScreen() {
   };
 
   const stopRecordingInstance = async () => {
-    const rec = recordingRef.current;
-    recordingRef.current = null;
-    if (!rec) return null;
     try {
-      await rec.stopAndUnloadAsync();
-      return rec.getURI();
+      const uri = await recorder.stop()
+      return uri
     } catch {
       return null;
     }
@@ -1542,28 +1492,24 @@ export default function ChatConversationScreen() {
   }, [cancelZoneSlide]);
 
   const startRecording = useCallback(async () => {
-    if (!voiceInputModeRef.current || recordingRef.current) return;
+    if (!voiceInputModeRef.current) return;
 
     try {
-      const permission = await Audio.requestPermissionsAsync();
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
       if (!permission.granted) {
         permissionAlert("microphone");
         hideCancelZoneRef.current(() => resetRecordingUi());
         return;
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
+      await AudioModule.setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
       });
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      await recording.startAsync();
+      await recorder.prepareToRecordAsync()
+      recorder.record()
 
-      recordingRef.current = recording;
       recordStartRef.current = Date.now();
       isRecordingRef.current = true;
 
@@ -1577,10 +1523,9 @@ export default function ChatConversationScreen() {
     } catch {
       Alert.alert("", "Could not start recording.");
       isRecordingRef.current = false;
-      recordingRef.current = null;
       hideCancelZoneRef.current(() => resetRecordingUi());
     }
-  }, [resetRecordingUi]);
+  }, [resetRecordingUi, recorder]);
 
   const cancelRecording = useCallback(async () => {
     if (isFinishingRef.current) return;

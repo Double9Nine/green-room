@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Audio } from "expo-av";
+import { useAudioPlayer, AudioModule } from "expo-audio";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -112,7 +112,7 @@ export function VoiceMessageBubble({
   msg: GroupChatMessage;
   isSent: boolean;
 }) {
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const player = useAudioPlayer(msg.voiceUri ? { uri: msg.voiceUri } : null)
   const [playing, setPlaying] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(
@@ -123,65 +123,22 @@ export function VoiceMessageBubble({
   const progress =
     durationMs > 0 ? Math.min(1, positionMs / durationMs) : 0;
 
-  const unloadSound = useCallback(async () => {
-    const sound = soundRef.current;
-    soundRef.current = null;
-    if (!sound) return;
-    try {
-      await sound.unloadAsync();
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      void unloadSound();
-    };
-  }, [unloadSound]);
-
   const togglePlay = async () => {
-    if (!msg.voiceUri) return;
-
+    if (!msg.voiceUri) return
     try {
-      if (playing && soundRef.current) {
-        await soundRef.current.pauseAsync();
-        setPlaying(false);
-        return;
+      await AudioModule.setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+      })
+      if (playing) {
+        player.pause()
+        setPlaying(false)
+      } else {
+        player.play()
+        setPlaying(true)
       }
-
-      if (soundRef.current) {
-        await soundRef.current.playAsync();
-        setPlaying(true);
-        return;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      });
-
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: msg.voiceUri },
-        { shouldPlay: true },
-        (status) => {
-          if (!status.isLoaded) return;
-          setPositionMs(status.positionMillis ?? 0);
-          if (status.durationMillis != null) {
-            setDurationMs(status.durationMillis);
-          }
-          if (status.didJustFinish) {
-            setPlaying(false);
-            setPositionMs(0);
-            void sound.setPositionAsync(0);
-          }
-        }
-      );
-
-      soundRef.current = sound;
-      setPlaying(true);
     } catch {
-      Alert.alert("", "Could not play this voice message.");
+      setPlaying(false);
       setPlaying(false);
     }
   };

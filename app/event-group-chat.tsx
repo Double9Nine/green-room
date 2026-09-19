@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Audio } from "expo-av";
+import { useAudioRecorder, AudioModule, RecordingPresets } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -151,7 +151,7 @@ export default function EventGroupChatScreen() {
 
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY)
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordStartRef = useRef(0);
   const isRecordingRef = useRef(false);
@@ -647,12 +647,9 @@ export default function EventGroupChatScreen() {
   };
 
   const stopRecordingInstance = async () => {
-    const rec = recordingRef.current;
-    recordingRef.current = null;
-    if (!rec) return null;
     try {
-      await rec.stopAndUnloadAsync();
-      return rec.getURI();
+      const uri = await recorder.stop()
+      return uri
     } catch {
       return null;
     }
@@ -691,28 +688,24 @@ export default function EventGroupChatScreen() {
   );
 
   const startRecording = useCallback(async () => {
-    if (!voiceInputModeRef.current || recordingRef.current) return;
+    if (!voiceInputModeRef.current) return;
 
     try {
-      const permission = await Audio.requestPermissionsAsync();
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
       if (!permission.granted) {
         permissionAlert("microphone");
         hideCancelZoneRef.current(() => resetRecordingUi());
         return;
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
+      await AudioModule.setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
       });
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      await recording.startAsync();
+      await recorder.prepareToRecordAsync()
+      recorder.record()
 
-      recordingRef.current = recording;
       recordStartRef.current = Date.now();
       isRecordingRef.current = true;
 
@@ -726,10 +719,9 @@ export default function EventGroupChatScreen() {
     } catch {
       Alert.alert("", "Could not start recording.");
       isRecordingRef.current = false;
-      recordingRef.current = null;
       hideCancelZoneRef.current(() => resetRecordingUi());
     }
-  }, [resetRecordingUi]);
+  }, [resetRecordingUi, recorder]);
 
   const cancelRecording = useCallback(async () => {
     if (isFinishingRef.current) return;

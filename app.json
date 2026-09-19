@@ -57,7 +57,8 @@
       "expo-location",
       "expo-av",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true,
