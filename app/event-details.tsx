@@ -163,6 +163,47 @@ export default function EventDetailsScreen() {
 
     const membersMap = await loadEventMembers();
     setEventMembersMap(membersMap);
+
+    // Fetch pending requests from Supabase for organizer
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: pendingAttendees } = await supabase
+          .from('event_attendees')
+          .select(`
+            user_id,
+            status,
+            joined_at,
+            profiles (
+              name
+            )
+          `)
+          .eq('event_id', String(eventId))
+          .eq('status', 'pending')
+          .neq('user_id', user.id)
+
+        if (pendingAttendees && pendingAttendees.length > 0) {
+          const pendingRequests = pendingAttendees.map((a: any) => ({
+            eventId: Number(eventId),
+            userId: a.user_id,
+            userName: a.profiles?.name ?? 'Unknown',
+            userInitial: (a.profiles?.name ?? 'U')[0].toUpperCase(),
+            status: 'pending' as const,
+            requestedAt: new Date(a.joined_at).getTime(),
+          }))
+
+          const existing = await loadPendingRequests()
+          await savePendingRequests({
+            ...existing,
+            [String(eventId)]: pendingRequests,
+          })
+
+          setEventMembersMap(prev => ({ ...prev }))
+        }
+      }
+    } catch {
+      // fail silently
+    }
   }, [eventId]);
 
   useEffect(() => {

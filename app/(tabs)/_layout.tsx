@@ -143,6 +143,7 @@ export default function TabsLayout() {
           },
           async (payload) => {
             const newRequest = payload.new as any
+            console.log('event_attendees INSERT received:', payload.new)
             if (newRequest.user_id === user.id) return // ignore own joins
 
             // Check if this request is for one of my events
@@ -153,6 +154,7 @@ export default function TabsLayout() {
                 .eq('id', newRequest.event_id)
                 .single()
 
+              console.log('organizer_id:', event?.organizer_id, 'user.id:', user.id)
               if (event?.organizer_id !== user.id) return
               if (newRequest.status !== 'pending') return
 
@@ -167,7 +169,9 @@ export default function TabsLayout() {
             }
           }
         )
-        .subscribe()
+        .subscribe((status) => {
+          console.log('requestChannel subscribed', status)
+        })
 
       approvalChannel = supabase
         .channel(`my-event-approvals-${user.id}`)
@@ -253,12 +257,19 @@ export default function TabsLayout() {
 
             if (myEvents && myEvents.length > 0) {
               const myEventIds = myEvents.map((e: any) => e.id)
+
+              // Get last seen timestamp
+              const lastSeenRaw = await AsyncStorage.getItem('explore_requests_last_seen')
+              const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw) : 0
+
+              // Only count requests newer than last seen
               const { data: pendingRequests } = await supabase
                 .from('event_attendees')
-                .select('id')
+                .select('id, joined_at')
                 .in('event_id', myEventIds)
                 .eq('status', 'pending')
                 .neq('user_id', user.id)
+                .gt('joined_at', new Date(lastSeen).toISOString())
 
               pendingCount = pendingRequests?.length ?? 0
             }

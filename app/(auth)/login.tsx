@@ -225,6 +225,8 @@ export default function LoginScreen() {
 
             const count = pendingRequests?.length ?? 0
             await AsyncStorage.setItem('exploreBadge', String(count))
+            // Clear local pending map so it gets refreshed from Supabase
+            await AsyncStorage.removeItem('pendingRequests')
           }
         } catch {
           // fail silently

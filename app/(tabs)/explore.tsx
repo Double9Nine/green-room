@@ -51,6 +51,7 @@ import {
   loadEventMembers,
   loadEventRequests,
   loadPendingRequests,
+  savePendingRequests,
   resolveEventSpotsAndMembers,
   submitJoinRequest,
   type EventRequest,
@@ -1215,6 +1216,7 @@ export default function ExploreScreen() {
   >([]);
   const [shareModalEvent, setShareModalEvent] = useState<PlazaEvent | null>(null);
   const loadStorage = useCallback(async () => {
+    console.log('loadStorage called')
     try {
       await ensureDemoEventSeed();
       const [myRaw, joinedRaw, likedRaw, requests, pending, members] = await Promise.all([
@@ -1279,6 +1281,64 @@ export default function ExploreScreen() {
       setEventRequestsList(requests);
       setPendingMap(pending);
       setEventMembersMap(members);
+
+      // Fetch pending requests from Supabase for my events
+      try {
+        console.log('fetching pending from Supabase...')
+        const { data: { user } } = await supabase.auth.getUser()
+        console.log('user for pending fetch:', user?.id)
+        if (user) {
+          const { data: myEventsData } = await supabase
+            .from('events')
+            .select('id')
+            .eq('organizer_id', user.id)
+
+          if (myEventsData && myEventsData.length > 0) {
+            const myEventIds = myEventsData.map((e: any) => e.id)
+            const { data: pendingAttendees, error: pendingError } = await supabase
+              .from('event_attendees')
+              .select('event_id, user_id, status, joined_at')
+              .in('event_id', myEventIds)
+              .eq('status', 'pending')
+              .neq('user_id', user.id)
+
+            // Fetch profile names separately
+            const userIds = pendingAttendees?.map((a: any) => a.user_id) ?? []
+            const { data: profilesData } = userIds.length > 0
+              ? await supabase.from('profiles').select('id, name').in('id', userIds)
+              : { data: [] }
+
+            const profileMap: Record<string, string> = {}
+            for (const p of profilesData ?? []) {
+              profileMap[p.id] = p.name
+            }
+
+            console.log('pendingError:', pendingError)
+            console.log('pendingAttendees:', pendingAttendees?.length, pendingAttendees)
+            console.log('pendingAttendees with profiles:', JSON.stringify(pendingAttendees))
+            if (pendingAttendees && pendingAttendees.length > 0) {
+              const supabasePending: EventRequestsByEvent = {}
+              for (const a of pendingAttendees) {
+                const key = String(a.event_id)
+                if (!supabasePending[key]) supabasePending[key] = []
+                supabasePending[key].push({
+                  eventId: Number(a.event_id),
+                  userId: a.user_id,
+                  userName: profileMap[a.user_id] ?? 'Player',
+                  userInitial: (profileMap[a.user_id] ?? 'P')[0].toUpperCase(),
+                  status: 'pending' as const,
+                  requestedAt: new Date(a.joined_at).getTime(),
+                })
+              }
+              await savePendingRequests(supabasePending)
+              setPendingMap(supabasePending)
+              console.log('supabasePending:', JSON.stringify(supabasePending))
+            }
+          }
+        }
+      } catch {
+        // fail silently
+      }
     } catch {
       setMyEvents([]);
       setJoinedIds([]);
@@ -1560,6 +1620,15 @@ export default function ExploreScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Mark requests as seen
+      void AsyncStorage.setItem(
+        'explore_requests_last_seen',
+        String(Date.now())
+      )
+
+      // Clear explore badge
+      void AsyncStorage.setItem('exploreBadge', '0')
+
       void loadStorage();
       void loadJoinedRequests();
       void checkExpiredEvents();
@@ -1621,25 +1690,38 @@ export default function ExploreScreen() {
       });
 
       const loadBadges = async () => {
-        const allRequests = await loadEventRequests()
-        const myEventsRaw = await AsyncStorage.getItem('myEvents')
-        const myEvts = myEventsRaw ? JSON.parse(myEventsRaw) : []
-        const myEventIds = myEvts.map((e: any) => e.id)
+        let pendingCount = 0
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user) {
+            const { data: myEventsData } = await supabase
+              .from('events')
+              .select('id')
+              .eq('organizer_id', user.id)
 
-        const pendingCount = allRequests.filter(
-          (r) => r.status === 'pending'
-            && r.userId !== CURRENT_USER_ID
-            && myEventIds.includes(r.eventId)
-            && myEvts.find((e: any) => e.id === r.eventId)?.status !== 'past'
-        ).length
+            if (myEventsData && myEventsData.length > 0) {
+              const myEventIds = myEventsData.map((e: any) => e.id)
+              const lastSeenRaw = await AsyncStorage.getItem('explore_requests_last_seen')
+              const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw) : 0
 
-        await AsyncStorage.setItem(
-          'notif_pending_requests',
-          JSON.stringify(pendingCount)
-        )
-        const status = await getJoinedStatusChangesCount();
-        setMyEventsBadge(pendingCount);
-        setJoinedBadge(status);
+              const { data: pendingRequests } = await supabase
+                .from('event_attendees')
+                .select('id, joined_at')
+                .in('event_id', myEventIds)
+                .eq('status', 'pending')
+                .neq('user_id', user.id)
+                .gt('joined_at', new Date(lastSeen).toISOString())
+
+              pendingCount = pendingRequests?.length ?? 0
+            }
+          }
+        } catch {
+          // fail silently
+        }
+
+        const status = await getJoinedStatusChangesCount()
+        setMyEventsBadge(pendingCount)
+        setJoinedBadge(status)
       };
       void loadBadges();
     }, [loadStorage, loadJoinedRequests, checkExpiredEvents])
@@ -2328,18 +2410,36 @@ export default function ExploreScreen() {
 
   const handleDismiss = useCallback(
     async (eventId: number, status: string) => {
-      const raw = await AsyncStorage.getItem(EVENT_REQUESTS_KEY);
-      const requests = raw ? (JSON.parse(raw) as EventRequest[]) : [];
-      const updated = requests.filter((r) => {
-        if (r.eventId !== eventId || r.userId !== CURRENT_USER_ID) return true;
-        if (status === "expired") return r.status !== "pending";
-        return r.status !== status;
-      });
-      await AsyncStorage.setItem(EVENT_REQUESTS_KEY, JSON.stringify(updated));
-      await loadJoinedRequests();
-      await refreshRequestData();
+      // Update Supabase status for the requester
+      if (status === 'rejected') {
+        try {
+          // Find the userId from pendingMap
+          const pending = getPendingForEvent(pendingMap, eventId)
+          for (const req of pending) {
+            await supabase.from('event_attendees').update({
+              status: 'rejected'
+            }).eq('event_id', String(eventId))
+              .eq('user_id', req.userId)
+          }
+        } catch {
+          // fail silently
+        }
+      }
+
+      // Clear from pendingMap
+      const newPendingMap = { ...pendingMap }
+      delete newPendingMap[String(eventId)]
+      setPendingMap(newPendingMap)
+      await savePendingRequests(newPendingMap)
+
+      const raw = await AsyncStorage.getItem(EVENT_REQUESTS_KEY)
+      const requests = raw ? (JSON.parse(raw) as EventRequest[]) : []
+      const updated = requests.filter((r) => r.eventId !== eventId)
+      await AsyncStorage.setItem(EVENT_REQUESTS_KEY, JSON.stringify(updated))
+      await loadJoinedRequests()
+      await refreshRequestData()
     },
-    [loadJoinedRequests]
+    [loadJoinedRequests, pendingMap]
   );
 
   const handleRequestAgainById = useCallback(
