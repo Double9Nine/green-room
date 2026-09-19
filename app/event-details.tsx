@@ -379,7 +379,7 @@ export default function EventDetailsScreen() {
           status: 'pending',
           attended: null,
           attendance_answered: false,
-        })
+        }, { onConflict: 'event_id,user_id' })
       } catch {
         // fail silently
       }
