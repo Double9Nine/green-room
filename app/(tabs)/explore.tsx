@@ -1215,6 +1215,7 @@ export default function ExploreScreen() {
     }>
   >([]);
   const [shareModalEvent, setShareModalEvent] = useState<PlazaEvent | null>(null);
+  const [isCreating, setIsCreating] = useState(false)
   const loadStorage = useCallback(async () => {
     try {
       await ensureDemoEventSeed();
@@ -1748,6 +1749,40 @@ export default function ExploreScreen() {
 
               // Update myEventsBadge immediately
               setMyEventsBadge(prev => prev + 1)
+
+              // Also update pendingMap immediately
+              try {
+                const userIds = [newRequest.user_id]
+                const { data: profilesData } = await supabase
+                  .from('profiles')
+                  .select('id, name')
+                  .in('id', userIds)
+
+                const profileMap: Record<string, string> = {}
+                for (const p of profilesData ?? []) {
+                  profileMap[p.id] = p.name
+                }
+
+                const newPendingRequest = {
+                  eventId: Number(newRequest.event_id),
+                  userId: newRequest.user_id,
+                  userName: profileMap[newRequest.user_id] ?? 'Player',
+                  userInitial: (profileMap[newRequest.user_id] ?? 'P')[0].toUpperCase(),
+                  status: 'pending' as const,
+                  requestedAt: Date.now(),
+                }
+
+                setPendingMap(prev => {
+                  const key = String(newRequest.event_id)
+                  const existing = prev[key] ?? []
+                  return {
+                    ...prev,
+                    [key]: [...existing, newPendingRequest]
+                  }
+                })
+              } catch {
+                // fail silently
+              }
             }
           )
           .subscribe()
@@ -1755,8 +1790,64 @@ export default function ExploreScreen() {
 
       void setupRequestBadge()
 
+      let eventsChannel: ReturnType<typeof supabase.channel> | null = null
+
+      eventsChannel = supabase
+        .channel('public-events-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'events',
+          },
+          async (payload) => {
+            const newEvent = payload.new as any
+            const mapped: PlazaEvent = {
+              id: Number(newEvent.id),
+              user: newEvent.organizer_name ?? '',
+              organizer: newEvent.organizer_name ?? '',
+              organizerInitial: (newEvent.organizer_name ?? '?')[0].toUpperCase(),
+              sport: newEvent.sport ?? '',
+              sportEmoji: newEvent.sport_emoji ?? '',
+              title: newEvent.title ?? '',
+              location: newEvent.location ?? '',
+              distance: '',
+              time: newEvent.date_time ?? '',
+              postedAgo: '',
+              spots: newEvent.current_spots ?? 0,
+              maxSpots: newEvent.max_spots ?? 0,
+              likes: newEvent.likes ?? 0,
+              comments: 0,
+              details: newEvent.description ?? '',
+              photo: newEvent.photo_url ?? null,
+              lat: newEvent.lat ?? null,
+              lng: newEvent.lng ?? null,
+              organizer_id: newEvent.organizer_id,
+            }
+            setSupabaseEvents(prev => {
+              if (prev.find(e => e.id === mapped.id)) return prev
+              return [...prev, mapped]
+            })
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'events',
+          },
+          (payload) => {
+            const deleted = payload.old as any
+            setSupabaseEvents(prev => prev.filter(e => e.id !== Number(deleted.id)))
+          }
+        )
+        .subscribe()
+
       return () => {
         if (requestBadgeChannel) void supabase.removeChannel(requestBadgeChannel)
+        if (eventsChannel) void supabase.removeChannel(eventsChannel)
       }
     }, [loadStorage, loadJoinedRequests, checkExpiredEvents])
   );
@@ -2066,12 +2157,17 @@ export default function ExploreScreen() {
   };
 
   const handleCreateOrUpdate = async () => {
+    if (isCreating) return
+    setIsCreating(true)
+    try {
     if (!formName.trim() || !location.trim()) {
       Alert.alert("Missing info", "Please add an event name and location.");
+      setIsCreating(false)
       return;
     }
     if (!eventType || !sport) {
       Alert.alert("Missing info", "Please select an event type and sport.");
+      setIsCreating(false)
       return;
     }
 
@@ -2099,6 +2195,7 @@ export default function ExploreScreen() {
       );
       closeModal();
       setSubTab("my");
+      setIsCreating(false)
       return;
     }
 
@@ -2237,6 +2334,9 @@ export default function ExploreScreen() {
     setEventLng(null);
     closeModal();
     setSubTab("my");
+    } finally {
+      setIsCreating(false)
+    }
   };
 
   const scrollModalToEnd = () => {
@@ -3511,11 +3611,12 @@ export default function ExploreScreen() {
                 <Text style={styles.modalCancelBtnText}>Cancel</Text>
               </Pressable>
               <Pressable
-                style={styles.modalCreateBtn}
+                style={[styles.modalCreateBtn, isCreating && { opacity: 0.6 }]}
                 onPress={() => void handleCreateOrUpdate()}
+                disabled={isCreating}
               >
                 <Text style={styles.modalCreateBtnText}>
-                  {editingEvent ? "Save Changes" : "Create Event"}
+                  {isCreating ? "Creating..." : editingEvent ? "Save Changes" : "Create Event"}
                 </Text>
               </Pressable>
             </View>
