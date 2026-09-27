@@ -525,12 +525,57 @@ export default function EventDetailsScreen() {
           void (async () => {
             await leaveEvent(event.id);
 
-            // Also call decrement in case leaveEvent RPC failed
+            // Decrement spots in Supabase
             try {
               const { data: { user } } = await supabase.auth.getUser()
               if (user) {
                 await supabase.rpc('decrement_event_spots', {
                   event_id: String(event.id)
+                })
+
+                // Also delete from event_attendees
+                await supabase
+                  .from('event_attendees')
+                  .delete()
+                  .eq('event_id', String(event.id))
+                  .eq('user_id', user.id)
+              }
+            } catch {
+              // fail silently
+            }
+
+            // Remove group chat from her list
+            try {
+              const existingRaw = await AsyncStorage.getItem('groupChatConversations')
+              const existing = existingRaw ? JSON.parse(existingRaw) : []
+              const updated = existing.filter((c: any) => c.eventId !== String(event.id))
+              await AsyncStorage.setItem('groupChatConversations', JSON.stringify(updated))
+            } catch {
+              // fail silently
+            }
+
+            // Send admin message to group chat
+            try {
+              const { data: { user } } = await supabase.auth.getUser()
+              if (user) {
+                const { data: profile } = await supabase
+                  .from('profiles')
+                  .select('name')
+                  .eq('id', user.id)
+                  .single()
+
+                const name = profile?.name ?? 'Someone'
+
+                await supabase.from('group_messages').insert({
+                  id: `system-leave-${user.id}-${Date.now()}`,
+                  event_id: String(event.id),
+                  user_id: user.id,
+                  sender_name: 'System',
+                  sender_initial: '!',
+                  type: 'system',
+                  text: `${name} has left the event`,
+                  created_at: Date.now(),
+                  recalled: false,
                 })
               }
             } catch {

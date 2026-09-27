@@ -247,6 +247,8 @@ export default function EventGroupChatScreen() {
         .eq('event_id', eventId)
         .in('status', ['approved', 'confirmed'])
 
+      console.log('group chat eventId:', eventId, 'attendees:', attendees?.length, attendees)
+
       // Fetch profiles separately
       const userIds = attendees?.map((a: any) => a.user_id) ?? []
       const { data: profilesData } = userIds.length > 0
@@ -1180,6 +1182,25 @@ export default function EventGroupChatScreen() {
               </Text>
             ) : null}
             {messages.map((msg, index) => {
+              if (msg.type === 'system') {
+                return (
+                  <View key={msg.id} style={{
+                    alignItems: 'center',
+                    paddingVertical: 8,
+                    paddingHorizontal: 16,
+                  }}>
+                    <Text style={{
+                      fontSize: 12,
+                      color: '#94a3b8',
+                      fontStyle: 'italic',
+                      textAlign: 'center',
+                    }}>
+                      {msg.text}
+                    </Text>
+                  </View>
+                )
+              }
+
               const canLongPress = !msg.recalled && !msg.isConvertedTranscript;
               const isPhoto = msg.type === "photo" || msg.type === "image";
 
