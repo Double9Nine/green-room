@@ -1721,6 +1721,11 @@ export default function ExploreScreen() {
 
       let requestBadgeChannel: ReturnType<typeof supabase.channel> | null = null
 
+      if (requestBadgeChannel) {
+        void supabase.removeChannel(requestBadgeChannel)
+        requestBadgeChannel = null
+      }
+
       const setupRequestBadge = async () => {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
@@ -1814,11 +1819,6 @@ export default function ExploreScreen() {
             }
           )
           .subscribe()
-      }
-
-      if (requestBadgeChannel) {
-        void supabase.removeChannel(requestBadgeChannel)
-        requestBadgeChannel = null
       }
 
       void setupRequestBadge()
