@@ -524,6 +524,19 @@ export default function EventDetailsScreen() {
         onPress: () => {
           void (async () => {
             await leaveEvent(event.id);
+
+            // Also call decrement in case leaveEvent RPC failed
+            try {
+              const { data: { user } } = await supabase.auth.getUser()
+              if (user) {
+                await supabase.rpc('decrement_event_spots', {
+                  event_id: String(event.id)
+                })
+              }
+            } catch {
+              // fail silently
+            }
+
             setMyStatus("none");
             await refreshState();
           })();

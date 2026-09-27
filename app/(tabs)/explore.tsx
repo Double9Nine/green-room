@@ -1785,6 +1785,34 @@ export default function ExploreScreen() {
               }
             }
           )
+          .on(
+            'postgres_changes',
+            {
+              event: 'DELETE',
+              schema: 'public',
+              table: 'event_attendees',
+            },
+            (payload) => {
+              const deleted = payload.old as any
+              if (!deleted.event_id) return
+
+              // Remove from pendingMap
+              setPendingMap(prev => {
+                const key = String(deleted.event_id)
+                const existing = prev[key] ?? []
+                const updated = existing.filter(r => r.userId !== deleted.user_id)
+                if (updated.length === 0) {
+                  const newMap = { ...prev }
+                  delete newMap[key]
+                  return newMap
+                }
+                return { ...prev, [key]: updated }
+              })
+
+              // Update badge
+              setMyEventsBadge(prev => Math.max(0, prev - 1))
+            }
+          )
           .subscribe()
       }
 
@@ -1852,6 +1880,27 @@ export default function ExploreScreen() {
           (payload) => {
             const deleted = payload.old as any
             setSupabaseEvents(prev => prev.filter(e => e.id !== Number(deleted.id)))
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'events',
+          },
+          (payload) => {
+            const updated = payload.new as any
+            setSupabaseEvents(prev => prev.map(e =>
+              e.id === Number(updated.id)
+                ? { ...e, spots: updated.current_spots ?? e.spots }
+                : e
+            ))
+            setMyEvents(prev => prev.map(e =>
+              e.id === Number(updated.id)
+                ? { ...e, spots: updated.current_spots ?? e.spots }
+                : e
+            ))
           }
         )
         .subscribe()
