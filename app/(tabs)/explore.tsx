@@ -1790,6 +1790,7 @@ export default function ExploreScreen() {
 
       void setupRequestBadge()
 
+      let eventsInterval: ReturnType<typeof setInterval> | null = null
       let eventsChannel: ReturnType<typeof supabase.channel> | null = null
 
       eventsChannel = supabase
@@ -1848,6 +1849,7 @@ export default function ExploreScreen() {
       return () => {
         if (requestBadgeChannel) void supabase.removeChannel(requestBadgeChannel)
         if (eventsChannel) void supabase.removeChannel(eventsChannel)
+        clearInterval(eventsInterval)
       }
     }, [loadStorage, loadJoinedRequests, checkExpiredEvents])
   );
@@ -2632,6 +2634,23 @@ export default function ExploreScreen() {
         status: 'approved',
       }).eq('event_id', String(eventId))
         .eq('user_id', userId)
+
+      // Increment current_spots
+      await supabase.rpc('increment_event_spots', {
+        event_id: String(eventId)
+      })
+
+      // Update local supabaseEvents spots
+      setSupabaseEvents(prev => prev.map(e =>
+        e.id === eventId
+          ? { ...e, spots: e.spots + 1 }
+          : e
+      ))
+      setMyEvents(prev => prev.map(e =>
+        e.id === eventId
+          ? { ...e, spots: e.spots + 1 }
+          : e
+      ))
     } catch {
       // fail silently
     }

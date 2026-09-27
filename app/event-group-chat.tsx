@@ -119,6 +119,8 @@ export default function EventGroupChatScreen() {
   const sportEmoji = params.sportEmoji ?? "🎾";
   const organizer = params.organizer ?? "Organizer";
 
+  const [eventDeleted, setEventDeleted] = useState(false)
+
   const matchSport = useMemo(
     () => MATCH_SPORTS.find((s) => s.emoji === sportEmoji),
     [sportEmoji]
@@ -381,6 +383,23 @@ export default function EventGroupChatScreen() {
     useCallback(() => {
       void loadAllMembers();
       void loadChatData();
+
+      // Check if event has been deleted
+      void (async () => {
+        try {
+          const { data: event } = await supabase
+            .from('events')
+            .select('id')
+            .eq('id', eventId)
+            .single()
+
+          if (!event) {
+            setEventDeleted(true)
+          }
+        } catch {
+          setEventDeleted(true)
+        }
+      })()
     }, [loadAllMembers, loadChatData])
   );
 
@@ -1055,6 +1074,18 @@ export default function EventGroupChatScreen() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <SafeAreaView style={{ flex: 1, backgroundColor: "#052e16" }} edges={["top"]}>
+        {eventDeleted && (
+          <View style={{
+            backgroundColor: '#fee2e2',
+            padding: 12,
+            alignItems: 'center',
+            marginBottom: 8,
+          }}>
+            <Text style={{ color: '#dc2626', fontWeight: '600' }}>
+              This event has been deleted by the organizer
+            </Text>
+          </View>
+        )}
         <View style={styles.header}>
           <Pressable
             onPress={() => router.back()}
@@ -1296,7 +1327,7 @@ export default function EventGroupChatScreen() {
               <TextInput
                 ref={inputRef}
                 style={richStyles.input}
-                placeholder="Type a message..."
+                placeholder={eventDeleted ? "Event has been deleted" : "Type a message..."}
                 placeholderTextColor="#94a3b8"
                 value={inputText}
                 onChangeText={setInputText}
@@ -1304,6 +1335,7 @@ export default function EventGroupChatScreen() {
                 returnKeyType="send"
                 blurOnSubmit={false}
                 onSubmitEditing={sendTextMessage}
+                editable={!eventDeleted}
               />
             )}
 
@@ -1331,9 +1363,11 @@ export default function EventGroupChatScreen() {
             {!voiceInputMode && showSendButton ? (
               <Pressable
                 onPress={sendTextMessage}
+                disabled={eventDeleted}
                 style={({ pressed }) => [
                   richStyles.sendBtn,
                   pressed && richStyles.sendBtnPressed,
+                  eventDeleted && { opacity: 0.4 },
                 ]}
               >
                 <Ionicons name="arrow-up" size={22} color={WHITE} />

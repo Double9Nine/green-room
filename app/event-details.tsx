@@ -158,8 +158,33 @@ export default function EventDetailsScreen() {
     if (!eventId) return;
     await ensureDemoEventSeed();
 
-    const status = await getMyStatusForEvent(eventId);
-    setMyStatus(status);
+    // First try Supabase for real status
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: attendee } = await supabase
+          .from('event_attendees')
+          .select('status')
+          .eq('event_id', String(eventId))
+          .eq('user_id', user.id)
+          .single()
+
+        if (attendee) {
+          // Map Supabase 'approved' to local 'confirmed'
+          const rawStatus = attendee.status
+          const supabaseStatus = rawStatus === 'approved'
+            ? 'confirmed' as MemberStatus
+            : rawStatus as MemberStatus
+          setMyStatus(supabaseStatus)
+        } else {
+          setMyStatus('none')
+        }
+      }
+    } catch {
+      // fall back to local
+      const status = await getMyStatusForEvent(eventId)
+      setMyStatus(status)
+    }
 
     const membersMap = await loadEventMembers();
     setEventMembersMap(membersMap);
@@ -220,6 +245,32 @@ export default function EventDetailsScreen() {
     useCallback(() => {
       getCurrentUser().then(setCurrentUser);
       void refreshState();
+
+      const statusInterval = setInterval(async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user || !eventId) return
+
+          const { data: attendee } = await supabase
+            .from('event_attendees')
+            .select('status')
+            .eq('event_id', String(eventId))
+            .eq('user_id', user.id)
+            .single()
+
+          if (attendee) {
+            const rawStatus = attendee.status
+            const mappedStatus = rawStatus === 'approved'
+              ? 'confirmed' as MemberStatus
+              : rawStatus as MemberStatus
+            setMyStatus(mappedStatus)
+          }
+        } catch {
+          // fail silently
+        }
+      }, 5000)
+
+      return () => clearInterval(statusInterval)
     }, [refreshState])
   );
 
@@ -429,15 +480,34 @@ export default function EventDetailsScreen() {
       }
     }
 
-    setMyStatus("pending");
     await refreshState();
+    setMyStatus("pending");
   };
 
   const handleCancelRequest = async () => {
     if (!event) return;
-    await cancelJoinRequest(event.id);
+
+    // Immediately update UI
     setMyStatus("none");
+
+    await cancelJoinRequest(event.id);
+
+    // Also delete from Supabase
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase
+          .from('event_attendees')
+          .delete()
+          .eq('event_id', String(event.id))
+          .eq('user_id', user.id)
+      }
+    } catch {
+      // fail silently
+    }
+
     await refreshState();
+    setMyStatus("none");
   };
 
   const handleRequestAgain = async () => {
