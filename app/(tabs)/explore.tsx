@@ -1788,10 +1788,20 @@ export default function ExploreScreen() {
           .subscribe()
       }
 
+      if (requestBadgeChannel) {
+        void supabase.removeChannel(requestBadgeChannel)
+        requestBadgeChannel = null
+      }
+
       void setupRequestBadge()
 
       let eventsInterval: ReturnType<typeof setInterval> | null = null
       let eventsChannel: ReturnType<typeof supabase.channel> | null = null
+
+      if (eventsChannel) {
+        void supabase.removeChannel(eventsChannel)
+        eventsChannel = null
+      }
 
       eventsChannel = supabase
         .channel('public-events-changes')
@@ -1849,7 +1859,7 @@ export default function ExploreScreen() {
       return () => {
         if (requestBadgeChannel) void supabase.removeChannel(requestBadgeChannel)
         if (eventsChannel) void supabase.removeChannel(eventsChannel)
-        clearInterval(eventsInterval)
+        if (eventsInterval) clearInterval(eventsInterval)
       }
     }, [loadStorage, loadJoinedRequests, checkExpiredEvents])
   );
