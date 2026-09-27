@@ -243,24 +243,28 @@ export default function EventGroupChatScreen() {
     try {
       const { data: attendees } = await supabase
         .from('event_attendees')
-        .select(`
-          user_id,
-          status,
-          profiles (
-            name,
-            gender
-          )
-        `)
+        .select('user_id, status')
         .eq('event_id', eventId)
         .in('status', ['approved', 'confirmed'])
 
+      // Fetch profiles separately
+      const userIds = attendees?.map((a: any) => a.user_id) ?? []
+      const { data: profilesData } = userIds.length > 0
+        ? await supabase.from('profiles').select('id, name').in('id', userIds)
+        : { data: [] }
+
+      const profileMap: Record<string, string> = {}
+      for (const p of profilesData ?? []) {
+        profileMap[p.id] = p.name
+      }
+
       if (attendees && attendees.length > 0) {
         const supabaseMembers: ChatMember[] = attendees
-          .filter((a: any) => a.profiles?.name)
+          .filter((a: any) => profileMap[a.user_id])
           .map((a: any) => ({
-            name: a.profiles.name,
-            initial: a.profiles.name[0]?.toUpperCase() ?? '?',
-            isOrganizer: a.profiles.name === organizer,
+            name: profileMap[a.user_id],
+            initial: profileMap[a.user_id][0]?.toUpperCase() ?? '?',
+            isOrganizer: profileMap[a.user_id] === organizer,
             userId: a.user_id,
           }))
         setConfirmedMembers(supabaseMembers)

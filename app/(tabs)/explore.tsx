@@ -1752,8 +1752,16 @@ export default function ExploreScreen() {
               if (event?.organizer_id !== user.id) return
               if (newRequest.status !== 'pending') return
 
-              // Update myEventsBadge immediately
-              setMyEventsBadge(prev => prev + 1)
+              // Only increment if not already in pendingMap
+              setPendingMap(prev => {
+                const key = String(newRequest.event_id)
+                const existing = prev[key] ?? []
+                const alreadyExists = existing.find(r => r.userId === newRequest.user_id)
+                if (!alreadyExists) {
+                  setMyEventsBadge(badge => badge + 1)
+                }
+                return prev
+              })
 
               // Also update pendingMap immediately
               try {
@@ -1797,25 +1805,132 @@ export default function ExploreScreen() {
               schema: 'public',
               table: 'event_attendees',
             },
-            (payload) => {
+            async (payload) => {
+              console.log('event_attendees DELETE received:', payload.old)
               const deleted = payload.old as any
-              if (!deleted.event_id) return
 
-              // Remove from pendingMap
-              setPendingMap(prev => {
-                const key = String(deleted.event_id)
-                const existing = prev[key] ?? []
-                const updated = existing.filter(r => r.userId !== deleted.user_id)
-                if (updated.length === 0) {
-                  const newMap = { ...prev }
-                  delete newMap[key]
-                  return newMap
+              // If we have event_id use it directly
+              // If not, refresh pendingMap from Supabase
+              if (deleted.event_id) {
+                setPendingMap(prev => {
+                  const key = String(deleted.event_id)
+                  const existing = prev[key] ?? []
+                  const updated = existing.filter(r => r.userId !== deleted.user_id)
+                  if (updated.length === 0) {
+                    const newMap = { ...prev }
+                    delete newMap[key]
+                    return newMap
+                  }
+                  return { ...prev, [key]: updated }
+                })
+                setMyEventsBadge(prev => Math.max(0, prev - 1))
+              } else {
+                // Refresh from Supabase
+                try {
+                  const { data: { user } } = await supabase.auth.getUser()
+                  if (user) {
+                    const { data: myEventsData } = await supabase
+                      .from('events')
+                      .select('id')
+                      .eq('organizer_id', user.id)
+
+                    if (myEventsData && myEventsData.length > 0) {
+                      const myEventIds = myEventsData.map((e: any) => e.id)
+                      const lastSeenRaw = await AsyncStorage.getItem('explore_requests_last_seen')
+                      const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw) : 0
+
+                      const { data: pendingRequests } = await supabase
+                        .from('event_attendees')
+                        .select('event_id, user_id, joined_at')
+                        .in('event_id', myEventIds)
+                        .eq('status', 'pending')
+                        .neq('user_id', user.id)
+                        .gt('joined_at', new Date(lastSeen).toISOString())
+
+                      const newPendingMap: EventRequestsByEvent = {}
+                      for (const a of pendingRequests ?? []) {
+                        const key = String(a.event_id)
+                        if (!newPendingMap[key]) newPendingMap[key] = []
+                        newPendingMap[key].push({
+                          eventId: Number(a.event_id),
+                          userId: a.user_id,
+                          userName: 'Player',
+                          userInitial: 'P',
+                          status: 'pending' as const,
+                          requestedAt: new Date(a.joined_at).getTime(),
+                        })
+                      }
+                      setPendingMap(newPendingMap)
+                      setMyEventsBadge(pendingRequests?.length ?? 0)
+                    }
+                  }
+                } catch {
+                  // fail silently
                 }
-                return { ...prev, [key]: updated }
-              })
+              }
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'event_attendees',
+            },
+            async (payload) => {
+              const updated = payload.new as any
+              const old = payload.old as any
 
-              // Update badge
-              setMyEventsBadge(prev => Math.max(0, prev - 1))
+              // If status changed from pending to rejected → remove from pendingMap
+              if (old.status === 'pending' && updated.status === 'rejected') {
+                setPendingMap(prev => {
+                  const key = String(updated.event_id)
+                  const existing = prev[key] ?? []
+                  const filtered = existing.filter(r => r.userId !== updated.user_id)
+                  if (filtered.length === 0) {
+                    const newMap = { ...prev }
+                    delete newMap[key]
+                    return newMap
+                  }
+                  return { ...prev, [key]: filtered }
+                })
+                setMyEventsBadge(prev => Math.max(0, prev - 1))
+              }
+
+              // If status changed back to pending (request again) → add to pendingMap
+              if (updated.status === 'pending' && old.status === 'rejected') {
+                try {
+                  const { data: profilesData } = await supabase
+                    .from('profiles')
+                    .select('id, name')
+                    .in('id', [updated.user_id])
+
+                  const name = profilesData?.[0]?.name ?? 'Player'
+
+                  setPendingMap(prev => {
+                    const key = String(updated.event_id)
+                    const existing = prev[key] ?? []
+                    const alreadyExists = existing.find(r => r.userId === updated.user_id)
+                    if (!alreadyExists) {
+                      setMyEventsBadge(badge => badge + 1)
+                      return {
+                        ...prev,
+                        [key]: [...existing, {
+                          eventId: Number(updated.event_id),
+                          userId: updated.user_id,
+                          userName: name,
+                          userInitial: name[0].toUpperCase(),
+                          status: 'pending' as const,
+                          requestedAt: Date.now(),
+                        }]
+                      }
+                    }
+                    return prev
+                  })
+                } catch {
+                  // fail silently
+                }
+              }
             }
           )
           .subscribe()
@@ -2324,10 +2439,11 @@ export default function ExploreScreen() {
           updated_at: new Date().toISOString(),
         })
 
-        // Add organizer as first attendee
+        // Add organizer as first attendee with approved status
         await supabase.from('event_attendees').upsert({
           event_id: String(newEvent.id),
           user_id: authUser.id,
+          status: 'approved',
           attended: null,
           attendance_answered: false,
         })
