@@ -398,6 +398,9 @@ export default function EventDetailsScreen() {
   const handleRequestToJoin = async () => {
     if (!event || cannotJoin) return;
 
+    // Immediately update UI
+    setMyStatus("pending");
+
     const { data: { user } } = await supabase.auth.getUser()
     const userId = user?.id ?? CURRENT_USER_ID
 

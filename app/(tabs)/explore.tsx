@@ -1874,6 +1874,10 @@ export default function ExploreScreen() {
       void clearJoinedStatusChanges();
       setJoinedBadge(0);
     }
+    if (tab === "my") {
+      setMyEventsBadge(0);
+      void AsyncStorage.setItem('explore_requests_last_seen', String(Date.now()))
+    }
   }, []);
 
   const getRequestStatus = useCallback(
@@ -2200,42 +2204,7 @@ export default function ExploreScreen() {
     }
 
     const user = await getCurrentUser();
-
-    let uploadedPhotoUrl: string | null = eventPhoto
-
-    if (eventPhoto && !eventPhoto.startsWith('http')) {
-      try {
-        const { data: { user: authUser } } = await supabase.auth.getUser()
-        if (authUser) {
-          const filename = `${authUser.id}_${Date.now()}.jpg`
-          const path = `events/${filename}`
-
-          const base64 = await FileSystem.readAsStringAsync(eventPhoto, {
-            encoding: 'base64',
-          })
-
-          const byteArray = Uint8Array.from(
-            atob(base64).split('').map(c => c.charCodeAt(0))
-          )
-
-          const { error } = await supabase.storage
-            .from('event-images')
-            .upload(path, byteArray, {
-              contentType: 'image/jpeg',
-              upsert: false,
-            })
-
-          if (!error) {
-            const { data: { publicUrl } } = supabase.storage
-              .from('event-images')
-              .getPublicUrl(path)
-            uploadedPhotoUrl = publicUrl
-          }
-        }
-      } catch {
-        // fail silently - use local photo
-      }
-    }
+    const localPhoto = eventPhoto
 
     const newEvent: PlazaEvent = {
       id: Date.now(),
@@ -2264,7 +2233,7 @@ export default function ExploreScreen() {
       details: details.trim(),
       dateLabel: dateStr,
       timeLabel: timeStr,
-      photo: uploadedPhotoUrl || null,
+      photo: localPhoto || null,
       lat: eventLat,
       lng: eventLng,
     };
@@ -2272,11 +2241,12 @@ export default function ExploreScreen() {
     await persistMyEvents([newEvent, ...myEvents]);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (authUser) {
+        // Create event immediately with no photo
         await supabase.from('events').upsert({
           id: String(newEvent.id),
-          organizer_id: user.id,
+          organizer_id: authUser.id,
           organizer_name: newEvent.organizer,
           sport: newEvent.sport,
           sport_emoji: newEvent.sportEmoji ?? '',
@@ -2286,7 +2256,7 @@ export default function ExploreScreen() {
           date_time: newEvent.time,
           max_spots: newEvent.maxSpots,
           current_spots: 1,
-          photo_url: uploadedPhotoUrl ?? null,
+          photo_url: null,
           lat: newEvent.lat ?? null,
           lng: newEvent.lng ?? null,
           likes: 0,
@@ -2296,7 +2266,7 @@ export default function ExploreScreen() {
         // Add organizer as first attendee
         await supabase.from('event_attendees').upsert({
           event_id: String(newEvent.id),
-          user_id: user.id,
+          user_id: authUser.id,
           attended: null,
           attendance_answered: false,
         })
@@ -2322,6 +2292,49 @@ export default function ExploreScreen() {
           }
         } catch {
           // fail silently
+        }
+
+        // Upload photo in background
+        if (localPhoto && !localPhoto.startsWith('http')) {
+          void (async () => {
+            try {
+              const filename = `${authUser.id}_${Date.now()}.jpg`
+              const path = `events/${filename}`
+
+              const base64 = await FileSystem.readAsStringAsync(localPhoto, {
+                encoding: 'base64',
+              })
+
+              const byteArray = Uint8Array.from(
+                atob(base64).split('').map(c => c.charCodeAt(0))
+              )
+
+              const { error } = await supabase.storage
+                .from('event-images')
+                .upload(path, byteArray, {
+                  contentType: 'image/jpeg',
+                  upsert: false,
+                })
+
+              if (!error) {
+                const { data: { publicUrl } } = supabase.storage
+                  .from('event-images')
+                  .getPublicUrl(path)
+
+                // Update event with photo_url
+                await supabase.from('events')
+                  .update({ photo_url: publicUrl })
+                  .eq('id', String(newEvent.id))
+
+                // Update local state
+                setMyEvents(prev => prev.map(e =>
+                  e.id === newEvent.id ? { ...e, photo: publicUrl } : e
+                ))
+              }
+            } catch {
+              // fail silently
+            }
+          })()
         }
       }
     } catch {
