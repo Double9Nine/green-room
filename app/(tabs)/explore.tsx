@@ -1717,6 +1717,47 @@ export default function ExploreScreen() {
         setJoinedBadge(status)
       };
       void loadBadges();
+
+      let requestBadgeChannel: ReturnType<typeof supabase.channel> | null = null
+
+      const setupRequestBadge = async () => {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        requestBadgeChannel = supabase
+          .channel(`explore-requests-${user.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'event_attendees',
+            },
+            async (payload) => {
+              const newRequest = payload.new as any
+              if (newRequest.user_id === user.id) return
+
+              const { data: event } = await supabase
+                .from('events')
+                .select('organizer_id')
+                .eq('id', newRequest.event_id)
+                .single()
+
+              if (event?.organizer_id !== user.id) return
+              if (newRequest.status !== 'pending') return
+
+              // Update myEventsBadge immediately
+              setMyEventsBadge(prev => prev + 1)
+            }
+          )
+          .subscribe()
+      }
+
+      void setupRequestBadge()
+
+      return () => {
+        if (requestBadgeChannel) void supabase.removeChannel(requestBadgeChannel)
+      }
     }, [loadStorage, loadJoinedRequests, checkExpiredEvents])
   );
 
@@ -2591,13 +2632,57 @@ export default function ExploreScreen() {
         style: "destructive",
         onPress: () => {
           void (async () => {
-            await persistMyEvents(myEvents.filter((e) => e.id !== event.id));
-            const nextJoined = joinedIds.filter((id) => id !== event.id);
-            await persistJoined(nextJoined);
-          })();
+            // Remove from local state immediately
+            setMyEvents(prev => prev.filter(e => e.id !== event.id))
+            setSupabaseEvents(prev => prev.filter(e => e.id !== event.id))
+
+            await persistMyEvents(myEvents.filter((e) => e.id !== event.id))
+            const nextJoined = joinedIds.filter((id) => id !== event.id)
+            await persistJoined(nextJoined)
+
+            // Delete from Supabase
+            try {
+              await supabase.from('events').delete().eq('id', String(event.id))
+              await supabase.from('event_attendees').delete().eq('event_id', String(event.id))
+
+              // Refetch supabase events to update discover tab
+              const { data: refreshed } = await supabase
+                .from('events')
+                .select('*')
+                .order('date_time', { ascending: true })
+
+              if (refreshed) {
+                const mapped: PlazaEvent[] = refreshed.map((e: any) => ({
+                  id: Number(e.id),
+                  user: e.organizer_name ?? '',
+                  organizer: e.organizer_name ?? '',
+                  organizerInitial: (e.organizer_name ?? '?')[0].toUpperCase(),
+                  sport: e.sport ?? '',
+                  sportEmoji: e.sport_emoji ?? '',
+                  title: e.title ?? '',
+                  location: e.location ?? '',
+                  distance: '',
+                  time: e.date_time ?? '',
+                  postedAgo: '',
+                  spots: e.current_spots ?? 0,
+                  maxSpots: e.max_spots ?? 0,
+                  likes: e.likes ?? 0,
+                  comments: 0,
+                  details: e.description ?? '',
+                  photo: e.photo_url ?? null,
+                  lat: e.lat ?? null,
+                  lng: e.lng ?? null,
+                  organizer_id: e.organizer_id,
+                }))
+                setSupabaseEvents(mapped)
+              }
+            } catch {
+              // fail silently
+            }
+          })()
         },
       },
-    ]);
+    ])
   };
 
   const toggleLike = async (id: number) => {
