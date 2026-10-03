@@ -247,6 +247,7 @@ export async function leaveEvent(eventId: number): Promise<void> {
   );
 
   // Sync to Supabase
+  console.log('leaveEvent called for eventId:', eventId)
   try {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
@@ -260,9 +261,10 @@ export async function leaveEvent(eventId: number): Promise<void> {
       await supabase.rpc('decrement_event_spots', {
         event_id: String(eventId)
       })
+      console.log('decrement_event_spots called for event:', eventId)
     }
-  } catch {
-    // fail silently
+  } catch (e) {
+    console.log('leaveEvent Supabase error:', e)
   }
 }
 

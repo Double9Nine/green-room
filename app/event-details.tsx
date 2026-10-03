@@ -525,24 +525,6 @@ export default function EventDetailsScreen() {
           void (async () => {
             await leaveEvent(event.id);
 
-            // Decrement spots in Supabase
-            try {
-              const { data: { user } } = await supabase.auth.getUser()
-              if (user) {
-                await supabase.rpc('decrement_event_spots', {
-                  event_id: String(event.id)
-                })
-
-                // Also delete from event_attendees
-                await supabase
-                  .from('event_attendees')
-                  .delete()
-                  .eq('event_id', String(event.id))
-                  .eq('user_id', user.id)
-              }
-            } catch {
-              // fail silently
-            }
 
             // Remove group chat from her list
             try {

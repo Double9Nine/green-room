@@ -2005,6 +2005,7 @@ export default function ExploreScreen() {
             table: 'events',
           },
           (payload) => {
+            console.log('events UPDATE received:', payload.new)
             const updated = payload.new as any
             setSupabaseEvents(prev => prev.map(e =>
               e.id === Number(updated.id)
@@ -2075,13 +2076,13 @@ export default function ExploreScreen() {
     }
 
     const merged = [...allReal, ...DUMMY_EVENTS].map((e) => {
-      const isSupabaseEvent = supabaseEvents.some(s => s.id === e.id)
-        && !myEvents.some(m => m.id === e.id)
+      const supabaseVersion = supabaseEvents.find(s => s.id === e.id)
 
-      if (isSupabaseEvent) {
+      if (supabaseVersion) {
         return {
           ...e,
-          spots: e.spots,
+          spots: supabaseVersion.spots,
+          maxSpots: supabaseVersion.maxSpots,
         }
       }
 
