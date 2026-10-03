@@ -547,9 +547,9 @@ export default function ChatScreen() {
               if (!user) return
 
               const convId = convo.id
-              const otherUserId = convId
-                .replace(user.id, '')
-                .replace(/^_|_$/g, '')
+              const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
+              const matches = convId.match(uuidRegex)
+              const otherUserId = matches?.find(id => id !== user.id) ?? ''
 
               // Get current user's name
               const { data: profile } = await supabase
