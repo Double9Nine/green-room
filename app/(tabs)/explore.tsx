@@ -1344,47 +1344,86 @@ export default function ExploreScreen() {
 
   const loadJoinedRequests = useCallback(async () => {
     try {
-      const requests = await loadEventRequests();
-      const mine = requests.filter((r) => r.userId === CURRENT_USER_ID);
-      const confirmedList: EventRequest[] = [];
-      const pendingList: EventRequest[] = [];
-      const declinedList: EventRequest[] = [];
-      const removedList: EventRequest[] = [];
-      const expiredList: EventRequest[] = [];
-      const pastList: EventRequest[] = [];
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
 
-      mine.forEach((r) => {
-        const eventData = r.eventData as { time?: string } | undefined;
-        if (r.status === "past" && r.attended === true) {
-          pastList.push(r);
-        } else if (r.status === "confirmed" && !isEventExpired(eventData)) {
-          confirmedList.push(r);
-        } else if (r.status === "rejected") {
-          declinedList.push(r);
-        } else if (r.status === "removed") {
-          removedList.push(r);
-        } else if (r.status === "pending") {
-          if (isEventExpired(eventData)) {
-            expiredList.push(r);
-          } else {
-            pendingList.push(r);
+      const { data: attendees } = await supabase
+        .from('event_attendees')
+        .select(`
+          event_id,
+          status,
+          joined_at
+        `)
+        .eq('user_id', user.id)
+
+      if (!attendees) return
+
+      // Get event details for each attendee record
+      const eventIds = attendees.map((a: any) => a.event_id)
+      const { data: eventsData } = await supabase
+        .from('events')
+        .select('*')
+        .in('id', eventIds)
+
+      const confirmedList: EventRequest[] = []
+      const pendingList: EventRequest[] = []
+      const declinedList: EventRequest[] = []
+      const pastList: EventRequest[] = []
+
+      for (const a of attendees) {
+        const event = eventsData?.find((e: any) => e.id === a.event_id)
+        if (!event) continue
+
+        // Skip events where user is organizer
+        if (event.organizer_id === user.id) continue
+
+        const expired = event.date_time ? new Date(event.date_time) < new Date() : false
+
+        const req: EventRequest = {
+          eventId: Number(a.event_id),
+          userId: user.id,
+          userName: '',
+          userInitial: '',
+          status: a.status === 'approved' ? 'confirmed' : a.status,
+          requestedAt: new Date(a.joined_at).getTime(),
+          eventData: {
+            title: event.title,
+            sport: event.sport,
+            location: event.location,
+            time: event.date_time,
+            organizer: event.organizer_name,
+            sportEmoji: event.sport_emoji,
+            id: Number(event.id),
           }
         }
-      });
 
-      setConfirmedJoined(confirmedList);
-      setPendingJoined(pendingList);
-      setDeclinedJoined(declinedList);
-      setRemovedJoined(removedList);
-      setExpiredJoined(expiredList);
-      setPastJoined(pastList);
+        if (a.status === 'pending') {
+          if (!expired) {
+            pendingList.push(req)
+          }
+        } else if (a.status === 'approved' || a.status === 'confirmed') {
+          if (expired) {
+            pastList.push({ ...req, status: 'past' as MemberStatus })
+          } else {
+            confirmedList.push(req)
+          }
+        } else if (a.status === 'rejected') {
+          declinedList.push(req)
+        }
+      }
+
+      setConfirmedJoined(confirmedList)
+      setPendingJoined(pendingList)
+      setDeclinedJoined(declinedList)
+      setPastJoined(pastList)
+      setRemovedJoined([])
+      setExpiredJoined([])
+
     } catch {
-      setConfirmedJoined([]);
-      setPendingJoined([]);
-      setDeclinedJoined([]);
-      setRemovedJoined([]);
-      setExpiredJoined([]);
-      setPastJoined([]);
+      setConfirmedJoined([])
+      setPendingJoined([])
+      setDeclinedJoined([])
+      setPastJoined([])
     }
   }, []);
 
