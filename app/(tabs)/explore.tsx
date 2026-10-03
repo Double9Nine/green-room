@@ -1216,6 +1216,7 @@ export default function ExploreScreen() {
   >([]);
   const [shareModalEvent, setShareModalEvent] = useState<PlazaEvent | null>(null);
   const [isCreating, setIsCreating] = useState(false)
+  const badgeUpdateTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadStorage = useCallback(async () => {
     try {
       await ensureDemoEventSeed();
@@ -1791,6 +1792,7 @@ export default function ExploreScreen() {
             },
             async (payload) => {
               const newRequest = payload.new as any
+              console.log('INSERT triggered for:', newRequest.user_id, 'status:', newRequest.status)
               if (newRequest.user_id === user.id) return
 
               const { data: event } = await supabase
@@ -1944,7 +1946,6 @@ export default function ExploreScreen() {
                   }
                   return { ...prev, [key]: filtered }
                 })
-                setMyEventsBadge(prev => Math.max(0, prev - 1))
               }
 
               // If status changed back to pending (request again) → add to pendingMap
@@ -1961,22 +1962,21 @@ export default function ExploreScreen() {
                     const key = String(updated.event_id)
                     const existing = prev[key] ?? []
                     const alreadyExists = existing.find(r => r.userId === updated.user_id)
-                    if (!alreadyExists) {
-                      setMyEventsBadge(badge => badge + 1)
-                      return {
-                        ...prev,
-                        [key]: [...existing, {
-                          eventId: Number(updated.event_id),
-                          userId: updated.user_id,
-                          userName: name,
-                          userInitial: name[0].toUpperCase(),
-                          status: 'pending' as const,
-                          requestedAt: Date.now(),
-                        }]
-                      }
+                    if (alreadyExists) return prev  // already added by INSERT handler
+
+                    return {
+                      ...prev,
+                      [key]: [...existing, {
+                        eventId: Number(updated.event_id),
+                        userId: updated.user_id,
+                        userName: name,
+                        userInitial: name[0].toUpperCase(),
+                        status: 'pending' as const,
+                        requestedAt: Date.now(),
+                      }]
                     }
-                    return prev
                   })
+                  // Don't increment badge here - let INSERT handler do it
                 } catch {
                   // fail silently
                 }

@@ -468,13 +468,33 @@ export default function EventDetailsScreen() {
     // Also save to Supabase event_attendees
     if (user) {
       try {
-        await supabase.from('event_attendees').upsert({
-          event_id: String(event.id),
-          user_id: user.id,
-          status: 'pending',
-          attended: null,
-          attendance_answered: false,
-        }, { onConflict: 'event_id,user_id' })
+        // Check if record exists first
+        const { data: existing } = await supabase
+          .from('event_attendees')
+          .select('id, status')
+          .eq('event_id', String(event.id))
+          .eq('user_id', user.id)
+          .single()
+
+        if (existing) {
+          // UPDATE existing record
+          await supabase
+            .from('event_attendees')
+            .update({ status: 'pending' })
+            .eq('event_id', String(event.id))
+            .eq('user_id', user.id)
+        } else {
+          // INSERT new record
+          await supabase
+            .from('event_attendees')
+            .insert({
+              event_id: String(event.id),
+              user_id: user.id,
+              status: 'pending',
+              attended: null,
+              attendance_answered: false,
+            })
+        }
       } catch {
         // fail silently
       }
@@ -492,13 +512,13 @@ export default function EventDetailsScreen() {
 
     await cancelJoinRequest(event.id);
 
-    // Also delete from Supabase
+    // Update status to cancelled in Supabase
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         await supabase
           .from('event_attendees')
-          .delete()
+          .update({ status: 'cancelled' })
           .eq('event_id', String(event.id))
           .eq('user_id', user.id)
       }
