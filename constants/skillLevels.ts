@@ -1,7 +1,7 @@
 export const SPORTS = [
   { id: "tennis", label: "Tennis", emoji: "🎾" },
   { id: "badminton", label: "Badminton", emoji: "🏸" },
-  { id: "pickleball", label: "Pickleball", emoji: "🏓" },
+  { id: "pickleball", label: "Pickleball", emoji: "🥒" },
   { id: "bouldering", label: "Bouldering", emoji: "🧗" },
   { id: "golf", label: "Golf", emoji: "⛳" },
   { id: "running", label: "Running", emoji: "🏃" },

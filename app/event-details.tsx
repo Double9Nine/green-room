@@ -68,7 +68,7 @@ const PENDING_BG = "#fef9c3";
 
 const SPORT_PLACEHOLDER: Record<string, { bg: string; emoji: string }> = {
   Tennis: { bg: "#fed7aa", emoji: "🎾" },
-  Pickleball: { bg: "#fef08a", emoji: "🏓" },
+  Pickleball: { bg: "#fef08a", emoji: "🥒" },
   Padel: { bg: "#d9f99d", emoji: "🎾" },
   Running: { bg: "#fecaca", emoji: "🏃" },
   Soccer: { bg: "#bbf7d0", emoji: "⚽" },
