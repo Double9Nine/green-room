@@ -1387,12 +1387,13 @@ export default function ExploreScreen() {
           status: a.status === 'approved' ? 'confirmed' : a.status,
           requestedAt: new Date(a.joined_at).getTime(),
           eventData: {
-            title: event.title,
-            sport: event.sport,
-            location: event.location,
-            time: event.date_time,
+            title: event.title ?? '',
+            sport: event.sport ?? '',
+            location: event.location ?? '',
+            time: event.date_time ?? '',
             organizer: event.organizer_name ?? '',
             user: event.organizer_name ?? '',
+            organizerInitial: (event.organizer_name ?? '?')[0].toUpperCase(),
             sportEmoji: event.sport_emoji ?? '',
             id: Number(event.id),
             spots: event.current_spots ?? 0,
@@ -1401,6 +1402,9 @@ export default function ExploreScreen() {
             comments: 0,
             distance: '',
             postedAgo: '',
+            photo: event.photo_url ?? null,
+            lat: event.lat ?? null,
+            lng: event.lng ?? null,
           }
         }
 
