@@ -550,6 +550,9 @@ export default function ChatScreen() {
               const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
               const matches = convId.match(uuidRegex)
               const otherUserId = matches?.find(id => id !== user.id) ?? ''
+              console.log('unfriend - user.id:', user.id)
+              console.log('unfriend - convId:', convId)
+              console.log('unfriend - otherUserId:', otherUserId)
 
               // Get current user's name
               const { data: profile } = await supabase
@@ -572,13 +575,14 @@ export default function ChatScreen() {
               })
 
               // Mark other user's conversation as left
-              await supabase.from('conversations').update({
+              const updateResult = await supabase.from('conversations').update({
                 left_chat: true,
                 last_message: `${myName} has left this chat`,
                 updated_at: new Date().toISOString(),
               })
               .eq('id', convId)
               .eq('user_id', otherUserId)
+              console.log('update result:', updateResult)
 
               // Delete own conversation
               await supabase.from('conversations').delete()
