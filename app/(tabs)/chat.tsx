@@ -546,10 +546,12 @@ export default function ChatScreen() {
               const { data: { user } } = await supabase.auth.getUser()
               if (!user) return
 
-              const convId = convo.id
+              // Always construct the proper conversation_id
               const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
-              const matches = convId.match(uuidRegex)
-              const otherUserId = matches?.find(id => id !== user.id) ?? ''
+              const matches = convo.id.match(uuidRegex)
+              const otherUserId = matches?.find((id: string) => id !== user.id) ?? convo.id
+
+              const convId = [user.id, otherUserId].sort().join('_')
               console.log('unfriend - user.id:', user.id)
               console.log('unfriend - convId:', convId)
               console.log('unfriend - otherUserId:', otherUserId)
