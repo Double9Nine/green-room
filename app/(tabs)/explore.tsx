@@ -1402,6 +1402,8 @@ export default function ExploreScreen() {
           }
         } else if (a.status === 'rejected') {
           declinedList.push(req)
+        } else if (a.status === 'dismissed') {
+          continue
         }
       }
 
@@ -2802,6 +2804,21 @@ export default function ExploreScreen() {
       const requests = raw ? (JSON.parse(raw) as EventRequest[]) : []
       const updated = requests.filter((r) => r.eventId !== eventId)
       await AsyncStorage.setItem(EVENT_REQUESTS_KEY, JSON.stringify(updated))
+
+      // Also update in Supabase - mark as removed/dismissed
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          await supabase
+            .from('event_attendees')
+            .update({ status: 'dismissed' })
+            .eq('event_id', String(eventId))
+            .eq('user_id', user.id)
+        }
+      } catch {
+        // fail silently
+      }
+
       await loadJoinedRequests()
       await refreshRequestData()
     },
