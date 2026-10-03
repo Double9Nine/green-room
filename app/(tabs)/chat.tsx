@@ -599,6 +599,25 @@ export default function ChatScreen() {
               await supabase.from('messaged_players').delete()
                 .or(`and(user_id.eq.${user.id},messaged_user_id.eq.${otherUserId}),and(user_id.eq.${otherUserId},messaged_user_id.eq.${user.id})`)
 
+              // Also clear from AsyncStorage
+              try {
+                const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage')
+                const messagedRaw = await AsyncStorage.getItem('messagedPlayers')
+                if (messagedRaw) {
+                  const messaged = JSON.parse(messagedRaw)
+                  delete messaged[otherUserId]
+                  await AsyncStorage.setItem('messagedPlayers', JSON.stringify(messaged))
+                }
+                const skippedRaw = await AsyncStorage.getItem('skippedPlayers')
+                if (skippedRaw) {
+                  const skipped = JSON.parse(skippedRaw)
+                  delete skipped[otherUserId]
+                  await AsyncStorage.setItem('skippedPlayers', JSON.stringify(skipped))
+                }
+              } catch {
+                // fail silently
+              }
+
               // Remove from local state
               setConversations(prev => prev.filter(c => c.id !== convo.id))
               await removeConversation(convo.id)
