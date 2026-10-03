@@ -294,11 +294,7 @@ export default function EventDetailsScreen() {
     return buildConfirmedMembersList(event, eventMembersMap, event.id);
   }, [event, eventMembersMap]);
 
-  const displaySpots = event
-    ? isOrganizer
-      ? confirmedMembers.length
-      : event.spots
-    : 0;
+  const displaySpots = event ? event.spots : 0;
 
   const isFull = event
     ? isOrganizer

@@ -395,17 +395,6 @@ function DismissableCard({
         </Text>
       </View>
       <View style={styles.joinedCardActions}>
-        {showRequestAgain ? (
-          <Pressable
-            onPress={(e) => {
-              stopCardPress(e);
-              onRequestAgain?.();
-            }}
-            hitSlop={8}
-          >
-            <Text style={styles.joinedTextBtnGreen}>Request Again</Text>
-          </Pressable>
-        ) : null}
         <Pressable
           onPress={(e) => {
             stopCardPress(e);
@@ -449,15 +438,6 @@ function JoinedStatusCard({
         </View>
       ) : null}
       <View style={styles.joinedCardActions}>
-        <Pressable
-          onPress={(e) => {
-            stopCardPress(e);
-            onCancel?.();
-          }}
-          hitSlop={8}
-        >
-          <Text style={styles.joinedTextBtnGray}>Cancel Request</Text>
-        </Pressable>
       </View>
     </Pressable>
   );
@@ -1217,6 +1197,7 @@ export default function ExploreScreen() {
   const [shareModalEvent, setShareModalEvent] = useState<PlazaEvent | null>(null);
   const [isCreating, setIsCreating] = useState(false)
   const badgeUpdateTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const recentlyCancelledRef = useRef<Set<string>>(new Set())
   const loadStorage = useCallback(async () => {
     try {
       await ensureDemoEventSeed();
@@ -1805,15 +1786,32 @@ export default function ExploreScreen() {
               if (newRequest.status !== 'pending') return
 
               // Only increment if not already in pendingMap
-              setPendingMap(prev => {
-                const key = String(newRequest.event_id)
-                const existing = prev[key] ?? []
-                const alreadyExists = existing.find(r => r.userId === newRequest.user_id)
-                if (!alreadyExists) {
-                  setMyEventsBadge(badge => badge + 1)
+              // Fetch accurate count from Supabase
+              try {
+                const { data: { user: currentUser } } = await supabase.auth.getUser()
+                if (currentUser) {
+                  const { data: myEventsData } = await supabase
+                    .from('events')
+                    .select('id')
+                    .eq('organizer_id', currentUser.id)
+                  if (myEventsData && myEventsData.length > 0) {
+                    const myEventIds = myEventsData.map((e: any) => e.id)
+                    const lastSeenRaw = await AsyncStorage.getItem('explore_requests_last_seen')
+                    const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw) : 0
+                    const { data: pendingReqs } = await supabase
+                      .from('event_attendees')
+                      .select('id')
+                      .in('event_id', myEventIds)
+                      .eq('status', 'pending')
+                      .neq('user_id', currentUser.id)
+                      .gt('joined_at', new Date(lastSeen).toISOString())
+                    console.log('accurate pending count:', pendingReqs?.length)
+                    setMyEventsBadge(pendingReqs?.length ?? 0)
+                  }
                 }
-                return prev
-              })
+              } catch {
+                // fail silently
+              }
 
               // Also update pendingMap immediately
               try {
@@ -1861,21 +1859,14 @@ export default function ExploreScreen() {
               console.log('event_attendees DELETE received:', payload.old)
               const deleted = payload.old as any
 
-              // If we have event_id use it directly
-              // If not, refresh pendingMap from Supabase
+              // Only decrement badge, keep pendingMap until INSERT clears it
               if (deleted.event_id) {
-                setPendingMap(prev => {
-                  const key = String(deleted.event_id)
-                  const existing = prev[key] ?? []
-                  const updated = existing.filter(r => r.userId !== deleted.user_id)
-                  if (updated.length === 0) {
-                    const newMap = { ...prev }
-                    delete newMap[key]
-                    return newMap
-                  }
-                  return { ...prev, [key]: updated }
-                })
                 setMyEventsBadge(prev => Math.max(0, prev - 1))
+                // Mark as recently cancelled to prevent double badge on re-request
+                recentlyCancelledRef.current.add(deleted.user_id ?? '')
+                setTimeout(() => {
+                  recentlyCancelledRef.current.delete(deleted.user_id ?? '')
+                }, 2000)
               } else {
                 // Refresh from Supabase
                 try {
@@ -1930,6 +1921,7 @@ export default function ExploreScreen() {
               table: 'event_attendees',
             },
             async (payload) => {
+              console.log('UPDATE triggered:', payload.old?.status, '->', payload.new?.status)
               const updated = payload.new as any
               const old = payload.old as any
 

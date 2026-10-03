@@ -156,12 +156,27 @@ export default function TabsLayout() {
               if (event?.organizer_id !== user.id) return
               if (newRequest.status !== 'pending') return
 
-              // Increment explore badge
-              const raw = await AsyncStorage.getItem('exploreBadge')
-              const current = raw ? parseInt(raw) : 0
-              const next = current + 1
-              await AsyncStorage.setItem('exploreBadge', String(next))
-              setExploreBadge(next)
+              // Fetch accurate count instead of incrementing
+              const { data: myEventsData } = await supabase
+                .from('events')
+                .select('id')
+                .eq('organizer_id', user.id)
+
+              if (myEventsData && myEventsData.length > 0) {
+                const myEventIds = myEventsData.map((e: any) => e.id)
+                const lastSeenRaw = await AsyncStorage.getItem('explore_requests_last_seen')
+                const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw) : 0
+                const { data: pendingReqs } = await supabase
+                  .from('event_attendees')
+                  .select('id')
+                  .in('event_id', myEventIds)
+                  .eq('status', 'pending')
+                  .neq('user_id', user.id)
+                  .gt('joined_at', new Date(lastSeen).toISOString())
+                const count = pendingReqs?.length ?? 0
+                await AsyncStorage.setItem('exploreBadge', String(count))
+                setExploreBadge(count)
+              }
             } catch {
               // fail silently
             }

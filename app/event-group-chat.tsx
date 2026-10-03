@@ -329,8 +329,8 @@ export default function EventGroupChatScreen() {
     const forViewer = applyMessagesForViewer(loadedMessages, user.name);
     setMessages(forViewer);
 
-    // If no local messages, try Supabase
-    if (forViewer.length === 0) {
+    // Always fetch from Supabase for latest messages
+    {
       try {
         const { data: { user: supabaseUser } } = await supabase.auth.getUser()
         if (supabaseUser && eventId) {
@@ -360,6 +360,7 @@ export default function EventGroupChatScreen() {
             }))
             await saveGroupChatMessages(eventId, mapped)
             setMessages(mapped)
+            console.log('loaded messages:', mapped.length, mapped.map(m => ({type: m.type, text: m.text?.slice(0,20)})))
           }
         }
       } catch {
