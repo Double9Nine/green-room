@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { supabase } from "@/lib/supabase";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -531,6 +532,79 @@ export default function ChatScreen() {
     );
   }, []);
 
+  const handleUnfriend = async (convo: StoredConversation) => {
+    Alert.alert(
+      'Unfriend?',
+      'You will be removed from each other\'s chat. They will see that you have left.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unfriend',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { data: { user } } = await supabase.auth.getUser()
+              if (!user) return
+
+              const convId = convo.id
+              const otherUserId = convId
+                .replace(user.id, '')
+                .replace(/^_|_$/g, '')
+
+              // Get current user's name
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('name')
+                .eq('id', user.id)
+                .single()
+              const myName = profile?.name ?? 'Someone'
+
+              // Insert system message
+              await supabase.from('messages').insert({
+                id: `system-unfriend-${user.id}-${Date.now()}`,
+                conversation_id: convId,
+                user_id: user.id,
+                type: 'system',
+                text: `${myName} has left this chat`,
+                sent: true,
+                created_at: Date.now(),
+                recalled: false,
+              })
+
+              // Mark other user's conversation as left
+              await supabase.from('conversations').update({
+                left_chat: true,
+                last_message: `${myName} has left this chat`,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', convId)
+              .eq('user_id', otherUserId)
+
+              // Delete own conversation
+              await supabase.from('conversations').delete()
+                .eq('id', convId)
+                .eq('user_id', user.id)
+
+              // Delete all messages
+              await supabase.from('messages').delete()
+                .eq('conversation_id', convId)
+
+              // Delete from messaged_players
+              await supabase.from('messaged_players').delete()
+                .or(`and(user_id.eq.${user.id},messaged_user_id.eq.${otherUserId}),and(user_id.eq.${otherUserId},messaged_user_id.eq.${user.id})`)
+
+              // Remove from local state
+              setConversations(prev => prev.filter(c => c.id !== convo.id))
+              await removeConversation(convo.id)
+            } catch {
+              // fail silently
+            }
+          }
+        }
+      ]
+    )
+  }
+
   const handleMuteGroupChat = useCallback(async (eventId: string) => {
     swipeableRefs.current[`group-${eventId}`]?.close();
     setMutedGroupIds((prev) => {
@@ -622,6 +696,12 @@ export default function ChatScreen() {
             <Text style={styles.actionLabel}>{isMuted ? "Unmute" : "Mute"}</Text>
           </Pressable>
           <Pressable
+            style={[styles.swipeAction, { backgroundColor: '#ef4444' }]}
+            onPress={() => void handleUnfriend(convo)}
+          >
+            <Text style={styles.swipeActionText}>Unfriend</Text>
+          </Pressable>
+          <Pressable
             style={styles.deleteAction}
             onPress={() => handleDelete(convo)}
           >
@@ -631,7 +711,7 @@ export default function ChatScreen() {
         </View>
       );
     },
-    [handleDelete, handleMute, mutedIds]
+    [handleDelete, handleMute, handleUnfriend, mutedIds]
   );
 
   return (
@@ -949,6 +1029,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
+  },
+  swipeAction: {
+    width: ACTION_WIDTH,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  swipeActionText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "700",
   },
   actionLabel: {
     color: "#ffffff",

@@ -691,6 +691,19 @@ export default function ProfileScreen() {
             Account
           </Text>
 
+          {__DEV__ && (
+            <Pressable
+              style={{ padding: 16, alignItems: 'center', marginBottom: 8 }}
+              onPress={async () => {
+                const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage')
+                await AsyncStorage.clear()
+                Alert.alert('Done', 'All local data cleared! Please restart.')
+              }}
+            >
+              <Text style={{ color: '#ef4444', fontSize: 14 }}>[DEV] Clear All Local Data</Text>
+            </Pressable>
+          )}
+
           <Pressable
             onPress={handleLogOut}
             style={{

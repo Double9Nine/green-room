@@ -433,6 +433,8 @@ export default function ChatConversationScreen() {
   const [cancelZoneHighlighted, setCancelZoneHighlighted] = useState(false);
   const [toast, setToast] = useState("");
   const [isConverting, setIsConverting] = useState(false);
+  const [chatLeft, setChatLeft] = useState(false)
+  const [chatLeftBy, setChatLeftBy] = useState('')
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [actionSheetMessageId, setActionSheetMessageId] = useState<
     string | null
@@ -512,6 +514,33 @@ export default function ChatConversationScreen() {
     }
 
     void updateOtherUserProfile()
+  }, [purePlayerId])
+
+  useEffect(() => {
+    const checkLeftChat = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const otherUserId = resolveOtherUserId(purePlayerId, user.id)
+        const convId = getConversationId(user.id, otherUserId)
+
+        const { data: conv } = await supabase
+          .from('conversations')
+          .select('left_chat, last_message')
+          .eq('id', convId)
+          .eq('user_id', user.id)
+          .single()
+
+        if (conv?.left_chat) {
+          setChatLeft(true)
+          setChatLeftBy(conv.last_message ?? 'User has left this chat')
+        }
+      } catch {
+        // fail silently
+      }
+    }
+    void checkLeftChat()
   }, [purePlayerId])
 
   useEffect(() => {
@@ -2220,6 +2249,23 @@ export default function ChatConversationScreen() {
             </Animated.View>
           ) : null}
 
+          {chatLeft && (
+            <View style={{
+              backgroundColor: '#fee2e2',
+              padding: 12,
+              alignItems: 'center',
+              borderTopWidth: 1,
+              borderTopColor: '#fecaca',
+            }}>
+              <Text style={{ color: '#dc2626', fontSize: 13, fontWeight: '600' }}>
+                {chatLeftBy}
+              </Text>
+              <Text style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>
+                You can no longer send messages
+              </Text>
+            </View>
+          )}
+
           <View
             style={[
               styles.inputBar,
@@ -2261,17 +2307,17 @@ export default function ChatConversationScreen() {
                   returnKeyType="send"
                   blurOnSubmit={false}
                   onSubmitEditing={sendTextMessage}
-                  editable={canSendMessage}
+                  editable={canSendMessage && !chatLeft}
                 />
 
                 {showSendButton ? (
                   <Pressable
                     onPress={sendTextMessage}
-                    disabled={!canSendMessage}
+                    disabled={!canSendMessage || chatLeft}
                     style={({ pressed }) => [
                       styles.sendBtn,
                       pressed && styles.sendBtnPressed,
-                      !canSendMessage && { opacity: 0.4 },
+                      (!canSendMessage || chatLeft) && { opacity: 0.4 },
                     ]}
                   >
                     <Ionicons name="arrow-up" size={22} color="#ffffff" />
