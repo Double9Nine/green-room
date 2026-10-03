@@ -599,6 +599,10 @@ export default function ChatScreen() {
               await supabase.from('messaged_players').delete()
                 .or(`and(user_id.eq.${user.id},messaged_user_id.eq.${otherUserId}),and(user_id.eq.${otherUserId},messaged_user_id.eq.${user.id})`)
 
+              // Delete match limits so chat can restart fresh
+              await supabase.from('match_limits').delete()
+                .or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${user.id})`)
+
               // Also clear from AsyncStorage
               try {
                 const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage')

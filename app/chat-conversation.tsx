@@ -647,6 +647,26 @@ export default function ChatConversationScreen() {
             updated_at: new Date().toISOString(),
           }, { onConflict: 'id,user_id' })
           console.log('other user conv created for:', otherUserId)
+
+          // If this is a fresh start, remove any old unfriend messages
+          try {
+            const { data: existingMsgs } = await supabase
+              .from('messages')
+              .select('id')
+              .eq('conversation_id', getConversationId(user.id, otherUserId))
+              .neq('type', 'system')
+              .limit(1)
+
+            // Only delete system messages if this appears to be a fresh conversation
+            if (!existingMsgs || existingMsgs.length <= 1) {
+              await supabase.from('messages').delete()
+                .eq('conversation_id', getConversationId(user.id, otherUserId))
+                .eq('type', 'system')
+                .ilike('text', '%has left this chat%')
+            }
+          } catch {
+            // fail silently
+          }
         } catch (e) {
           console.log('other user conv error:', e)
         }
