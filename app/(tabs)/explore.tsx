@@ -1982,6 +1982,32 @@ export default function ExploreScreen() {
 
       void setupRequestBadge()
 
+      let myStatusChannel: ReturnType<typeof supabase.channel> | null = null
+
+      const setupMyStatusChannel = async () => {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        myStatusChannel = supabase
+          .channel(`my-attendee-status-${user.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'event_attendees',
+              filter: `user_id=eq.${user.id}`,
+            },
+            async () => {
+              // Refresh joined requests when status changes
+              await loadJoinedRequests()
+            }
+          )
+          .subscribe()
+      }
+
+      void setupMyStatusChannel()
+
       let eventsInterval: ReturnType<typeof setInterval> | null = null
       let eventsChannel: ReturnType<typeof supabase.channel> | null = null
 
@@ -2066,6 +2092,7 @@ export default function ExploreScreen() {
 
       return () => {
         if (requestBadgeChannel) void supabase.removeChannel(requestBadgeChannel)
+        if (myStatusChannel) void supabase.removeChannel(myStatusChannel)
         if (eventsChannel) void supabase.removeChannel(eventsChannel)
         if (eventsInterval) clearInterval(eventsInterval)
       }
