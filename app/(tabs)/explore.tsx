@@ -1803,15 +1803,18 @@ export default function ExploreScreen() {
               if (newRequest.status !== 'pending') return
 
               // Only increment if not already in pendingMap
-              setPendingMap(prev => {
-                const key = String(newRequest.event_id)
-                const existing = prev[key] ?? []
-                const alreadyExists = existing.find(r => r.userId === newRequest.user_id)
-                if (!alreadyExists) {
-                  setMyEventsBadge(badge => badge + 1)
-                }
-                return prev
-              })
+              // Small delay to allow UPDATE handler to process first
+              setTimeout(() => {
+                setPendingMap(prev => {
+                  const key = String(newRequest.event_id)
+                  const existing = prev[key] ?? []
+                  const alreadyExists = existing.find(r => r.userId === newRequest.user_id)
+                  if (!alreadyExists) {
+                    setMyEventsBadge(badge => badge + 1)
+                  }
+                  return prev
+                })
+              }, 500)
 
               // Also update pendingMap immediately
               try {
