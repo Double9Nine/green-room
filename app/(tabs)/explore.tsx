@@ -2005,7 +2005,6 @@ export default function ExploreScreen() {
             table: 'events',
           },
           (payload) => {
-            console.log('events UPDATE received:', payload.new)
             const updated = payload.new as any
             setSupabaseEvents(prev => prev.map(e =>
               e.id === Number(updated.id)
