@@ -48,7 +48,7 @@ const BORDER = "#e2e8f0";
 const ACCENT = "#22c55e";
 const ACCENT_DARK = "#15803d";
 const ACTION_WIDTH = 70;
-const SWIPE_ACTIONS_WIDTH = ACTION_WIDTH * 2;
+const SWIPE_ACTIONS_WIDTH = ACTION_WIDTH * 3;
 
 function formatConversationTime(timestamp: number) {
   if (!timestamp) return "";
