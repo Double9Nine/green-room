@@ -647,6 +647,16 @@ export default function ChatConversationScreen() {
             updated_at: new Date().toISOString(),
           }, { onConflict: 'id,user_id' })
           console.log('other user conv created for:', otherUserId)
+
+          // Remove any unfriend system messages so chat can restart
+          try {
+            await supabase.from('messages').delete()
+              .eq('conversation_id', getConversationId(user.id, otherUserId))
+              .eq('type', 'system')
+              .ilike('text', '%has left this chat%')
+          } catch {
+            // fail silently
+          }
         } catch (e) {
           console.log('other user conv error:', e)
         }
