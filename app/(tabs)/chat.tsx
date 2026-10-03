@@ -563,7 +563,7 @@ export default function ChatScreen() {
               const myName = profile?.name ?? 'Someone'
 
               // Insert system message
-              await supabase.from('messages').insert({
+              const insertResult = await supabase.from('messages').insert({
                 id: `system-unfriend-${user.id}-${Date.now()}`,
                 conversation_id: convId,
                 user_id: user.id,
@@ -573,6 +573,7 @@ export default function ChatScreen() {
                 created_at: Date.now(),
                 recalled: false,
               })
+              console.log('system message insert:', insertResult)
 
               // Mark other user's conversation as left
               const updateResult = await supabase.from('conversations').update({
