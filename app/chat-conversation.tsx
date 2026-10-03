@@ -555,6 +555,7 @@ export default function ChatConversationScreen() {
   }, []);
 
   const saveConversation = useCallback(async () => {
+    console.log('saveConversation called')
     try {
       const raw = await AsyncStorage.getItem(CONVERSATIONS_STORAGE_KEY);
       const convos = raw ? (JSON.parse(raw) as Record<string, unknown>[]) : [];
@@ -627,23 +628,28 @@ export default function ChatConversationScreen() {
           .single()
 
         // Also create conversation for the other user
-        await supabase.from('conversations').upsert({
-          id: getConversationId(user.id, otherUserId),
-          user_id: otherUserId,
-          player_name: myProfile?.name ?? '',
-          player_location: myProfile?.location ?? '',
-          player_skill: myProfile?.skill_level ?? '',
-          player_purpose: myProfile?.purpose ?? '',
-          player_age: '',
-          sport_emoji: sportEmoji,
-          last_message: lastMsg?.text ?? '',
-          last_message_time: Date.now(),
-          unread: true,
-          is_organizer_chat: false,
-          is_pro_player: false,
-          player_title: '',
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'id,user_id' })
+        try {
+          await supabase.from('conversations').upsert({
+            id: getConversationId(user.id, otherUserId),
+            user_id: otherUserId,
+            player_name: myProfile?.name ?? '',
+            player_location: myProfile?.location ?? '',
+            player_skill: myProfile?.skill_level ?? '',
+            player_purpose: myProfile?.purpose ?? '',
+            player_age: '',
+            sport_emoji: sportEmoji,
+            last_message: lastMsg?.text ?? '',
+            last_message_time: Date.now(),
+            unread: true,
+            is_organizer_chat: false,
+            is_pro_player: false,
+            player_title: '',
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'id,user_id' })
+          console.log('other user conv created for:', otherUserId)
+        } catch (e) {
+          console.log('other user conv error:', e)
+        }
       }
     } catch {
       // fail silently

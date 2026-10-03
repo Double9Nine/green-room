@@ -589,9 +589,10 @@ export default function ChatScreen() {
                 .eq('id', convId)
                 .eq('user_id', user.id)
 
-              // Delete all messages
+              // Delete all non-system messages
               await supabase.from('messages').delete()
                 .eq('conversation_id', convId)
+                .neq('type', 'system')
 
               // Delete from messaged_players
               await supabase.from('messaged_players').delete()
