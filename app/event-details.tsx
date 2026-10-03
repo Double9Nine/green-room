@@ -518,7 +518,7 @@ export default function EventDetailsScreen() {
       if (user) {
         await supabase
           .from('event_attendees')
-          .update({ status: 'cancelled' })
+          .delete()
           .eq('event_id', String(event.id))
           .eq('user_id', user.id)
       }
