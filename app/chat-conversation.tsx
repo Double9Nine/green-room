@@ -884,7 +884,7 @@ export default function ChatConversationScreen() {
                   const raw = await AsyncStorage.getItem('conversations')
                   const convos = raw ? JSON.parse(raw) : []
                   const updated = convos.map((c: any) =>
-                    c.id === conversationId
+                    (c.id === conversationId || c.playerName === playerName)
                       ? { ...c, unread: true, lastMessage: newMsg.text, lastMessageTime: newMsg.created_at }
                       : c
                   )

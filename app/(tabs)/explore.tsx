@@ -1989,6 +1989,11 @@ export default function ExploreScreen() {
           .subscribe()
       }
 
+      if (myStatusChannel) {
+        void supabase.removeChannel(myStatusChannel)
+        myStatusChannel = null
+      }
+
       void setupMyStatusChannel()
 
       let eventsInterval: ReturnType<typeof setInterval> | null = null
