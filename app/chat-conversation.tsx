@@ -525,16 +525,19 @@ export default function ChatConversationScreen() {
         const otherUserId = resolveOtherUserId(purePlayerId, user.id)
         const convId = getConversationId(user.id, otherUserId)
 
-        const { data: conv } = await supabase
-          .from('conversations')
-          .select('left_chat, last_message')
-          .eq('id', convId)
-          .eq('user_id', user.id)
-          .single()
+        // Check if there's a system unfriend message
+        const { data: systemMsg } = await supabase
+          .from('messages')
+          .select('text, user_id')
+          .eq('conversation_id', convId)
+          .eq('type', 'system')
+          .ilike('text', '%has left this chat%')
+          .neq('user_id', user.id)
+          .limit(1)
 
-        if (conv?.left_chat) {
+        if (systemMsg && systemMsg.length > 0) {
           setChatLeft(true)
-          setChatLeftBy(conv.last_message ?? 'User has left this chat')
+          setChatLeftBy(systemMsg[0].text ?? 'User has left this chat')
         }
       } catch {
         // fail silently
