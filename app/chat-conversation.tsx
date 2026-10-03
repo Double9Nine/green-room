@@ -528,14 +528,27 @@ export default function ChatConversationScreen() {
         // Check if there's a system unfriend message
         const { data: systemMsg } = await supabase
           .from('messages')
-          .select('text, user_id')
+          .select('text, user_id, created_at')
           .eq('conversation_id', convId)
           .eq('type', 'system')
           .ilike('text', '%has left this chat%')
           .neq('user_id', user.id)
+          .order('created_at', { ascending: false })
           .limit(1)
 
-        if (systemMsg && systemMsg.length > 0) {
+        if (!systemMsg || systemMsg.length === 0) return
+
+        // Check if there are any messages AFTER the system message
+        const { data: newMsgs } = await supabase
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', convId)
+          .neq('type', 'system')
+          .gt('created_at', systemMsg[0].created_at)
+          .limit(1)
+
+        // Only show banner if no new messages after unfriend
+        if (!newMsgs || newMsgs.length === 0) {
           setChatLeft(true)
           setChatLeftBy(systemMsg[0].text ?? 'User has left this chat')
         }
