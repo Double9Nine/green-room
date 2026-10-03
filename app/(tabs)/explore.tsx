@@ -1391,9 +1391,16 @@ export default function ExploreScreen() {
             sport: event.sport,
             location: event.location,
             time: event.date_time,
-            organizer: event.organizer_name,
-            sportEmoji: event.sport_emoji,
+            organizer: event.organizer_name ?? '',
+            user: event.organizer_name ?? '',
+            sportEmoji: event.sport_emoji ?? '',
             id: Number(event.id),
+            spots: event.current_spots ?? 0,
+            maxSpots: event.max_spots ?? 0,
+            likes: event.likes ?? 0,
+            comments: 0,
+            distance: '',
+            postedAgo: '',
           }
         }
 
