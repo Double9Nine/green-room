@@ -480,6 +480,41 @@ export default function ChatConversationScreen() {
   }, []);
 
   useEffect(() => {
+    const updateOtherUserProfile = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const otherUserId = resolveOtherUserId(purePlayerId, user.id)
+        if (!otherUserId || otherUserId === purePlayerId) return
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('skill_level, name, location, purpose')
+          .eq('id', otherUserId)
+          .single()
+
+        if (profile) {
+          // Update conversation with latest profile info
+          await supabase.from('conversations').update({
+            player_skill: profile.skill_level ?? '',
+            player_name: profile.name ?? '',
+            player_location: profile.location ?? '',
+            player_purpose: profile.purpose ?? '',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', getConversationId(user.id, otherUserId))
+          .eq('user_id', user.id)
+        }
+      } catch {
+        // fail silently
+      }
+    }
+
+    void updateOtherUserProfile()
+  }, [purePlayerId])
+
+  useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) {
         clearTimeout(toastTimeoutRef.current);
