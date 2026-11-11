@@ -864,6 +864,24 @@ export default function ChatConversationScreen() {
           },
           (payload) => {
             const newMsg = payload.new as any
+
+            if (newMsg.user_id !== user.id) {
+              if (
+                newMsg.type === 'system' &&
+                typeof newMsg.text === 'string' &&
+                newMsg.text.includes('has left this chat')
+              ) {
+                // other person unfriended -> show banner immediately
+                setChatLeft(true)
+                setChatLeftBy(newMsg.text)
+              } else if (newMsg.type !== 'system') {
+                // other person sent a normal message again (rematch)
+                // -> hide banner immediately
+                setChatLeft(false)
+                setChatLeftBy('')
+              }
+            }
+
             if (newMsg.user_id !== user.id) {
               appendMessageRef.current({
                 type: newMsg.type ?? 'text',
